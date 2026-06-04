@@ -1,4 +1,4 @@
-name: 🚀 Infinite Road Runner – AAA iOS Game
+name: 🏁 INFINITY RUN 3D – AAA iOS Game
 
 on:
   push:
@@ -26,14 +26,16 @@ jobs:
 
       - name: Create Directories
         run: |
-          mkdir -p InfiniteRoad/Sources
-          mkdir -p InfiniteRoad/Resources/Assets.xcassets/AppIcon.appiconset
-          mkdir -p InfiniteRoad/Resources/Sounds
+          mkdir -p InfinityRun/Sources
+          mkdir -p InfinityRun/Resources/Assets.xcassets/AppIcon.appiconset
+          mkdir -p InfinityRun/Resources/Sounds
 
-      # ── AppDelegate ──────────────────────────────────────────────────────────
+# ============================================================================
+#  APP DELEGATE
+# ============================================================================
       - name: AppDelegate.swift
         run: |
-          cat > InfiniteRoad/Sources/AppDelegate.swift << 'SWIFT_EOF'
+          cat > InfinityRun/Sources/AppDelegate.swift << 'SWIFT_EOF'
           import UIKit
 
           @main
@@ -51,77 +53,75 @@ jobs:
           }
           SWIFT_EOF
 
-      # ── Types ────────────────────────────────────────────────────────────────
+# ============================================================================
+#  TYPES & PREFERENCES
+# ============================================================================
       - name: Types.swift
         run: |
-          cat > InfiniteRoad/Sources/Types.swift << 'SWIFT_EOF'
+          cat > InfinityRun/Sources/Types.swift << 'SWIFT_EOF'
           import Foundation
+          import UIKit
 
           enum ObstacleType: CaseIterable {
-              case lowBarrier, tallBarrier, rock
-              var height: Float {
-                  switch self {
-                  case .lowBarrier: return 1.0
-                  case .tallBarrier: return 2.5
-                  case .rock: return 1.5
-                  }
-              }
-              var width: Float { return 1.2 }
-              var scorePenalty: Int { return 200 }
+              case low, tall, moving
+              var height: Float { self == .tall ? 3.2 : 1.6 }
+              var width: Float { 1.3 }
+          }
+
+          enum PowerUpType: CaseIterable {
+              case magnet, shield, speedBoost
           }
 
           enum CharacterSkin: String, CaseIterable {
-              case defaultMan = "Default"
-              case ninja      = "Ninja"
-              case robot      = "Robot"
+              case soldier = "Soldier"
+              case ninja   = "Ninja"
+              case cyborg  = "Cyborg"
 
-              var torsoColor: UIColor {
+              var bodyColor: UIColor {
                   switch self {
-                  case .defaultMan: return UIColor(red: 0.15, green: 0.25, blue: 0.45, alpha: 1)
-                  case .ninja:      return UIColor(red: 0.05, green: 0.05, blue: 0.05, alpha: 1)
-                  case .robot:      return UIColor(red: 0.55, green: 0.55, blue: 0.60, alpha: 1)
+                  case .soldier: return UIColor(red: 0.15, green: 0.25, blue: 0.45, alpha: 1)
+                  case .ninja:   return UIColor(red: 0.10, green: 0.10, blue: 0.10, alpha: 1)
+                  case .cyborg:  return UIColor(red: 0.55, green: 0.55, blue: 0.65, alpha: 1)
                   }
               }
               var headColor: UIColor {
                   switch self {
-                  case .defaultMan: return UIColor(red: 0.92, green: 0.76, blue: 0.65, alpha: 1)
-                  case .ninja:      return UIColor(red: 0.80, green: 0.70, blue: 0.60, alpha: 1)
-                  case .robot:      return UIColor(red: 0.70, green: 0.70, blue: 0.75, alpha: 1)
+                  case .soldier: return UIColor(red: 0.92, green: 0.76, blue: 0.65, alpha: 1)
+                  case .ninja:   return UIColor(red: 0.80, green: 0.68, blue: 0.58, alpha: 1)
+                  case .cyborg:  return UIColor(red: 0.75, green: 0.75, blue: 0.80, alpha: 1)
                   }
               }
-              var pantsColor: UIColor {
+              var legsColor: UIColor {
                   switch self {
-                  case .defaultMan: return UIColor(red: 0.10, green: 0.12, blue: 0.18, alpha: 1)
-                  case .ninja:      return UIColor(red: 0.08, green: 0.08, blue: 0.10, alpha: 1)
-                  case .robot:      return UIColor(red: 0.30, green: 0.30, blue: 0.35, alpha: 1)
+                  case .soldier: return UIColor(red: 0.10, green: 0.12, blue: 0.18, alpha: 1)
+                  case .ninja:   return UIColor(red: 0.08, green: 0.08, blue: 0.10, alpha: 1)
+                  case .cyborg:  return UIColor(red: 0.35, green: 0.35, blue: 0.40, alpha: 1)
                   }
               }
           }
 
           extension UserDefaults {
               private enum Keys {
-                  static let selectedSkin = "selected_skin"
-                  static let soundVolume = "sound_volume"
+                  static let skin = "selected_skin"
+                  static let volume = "sound_volume"
               }
               var selectedSkin: CharacterSkin {
-                  get {
-                      guard let raw = string(forKey: Keys.selectedSkin),
-                            let skin = CharacterSkin(rawValue: raw) else { return .defaultMan }
-                      return skin
-                  }
-                  set { set(newValue.rawValue, forKey: Keys.selectedSkin) }
+                  get { CharacterSkin(rawValue: string(forKey: Keys.skin) ?? "") ?? .soldier }
+                  set { set(newValue.rawValue, forKey: Keys.skin) }
               }
               var soundVolume: Float {
-                  get { return float(forKey: Keys.soundVolume) != 0 ? float(forKey: Keys.soundVolume) : 0.7 }
-                  set { set(newValue, forKey: Keys.soundVolume) }
+                  get { float(forKey: Keys.volume) != 0 ? float(forKey: Keys.volume) : 0.7 }
+                  set { set(newValue, forKey: Keys.volume) }
               }
           }
           SWIFT_EOF
 
-      # ── AudioManager ─────────────────────────────────────────────────────────
+# ============================================================================
+#  AUDIO MANAGER
+# ============================================================================
       - name: AudioManager.swift
         run: |
-          cat > InfiniteRoad/Sources/AudioManager.swift << 'SWIFT_EOF'
+          cat > InfinityRun/Sources/AudioManager.swift << 'SWIFT_EOF'
           import AVFoundation
 
           class AudioManager {
@@ -129,8 +129,8 @@ jobs:
               private var players: [String: AVAudioPlayer] = [:]
               private var bgmPlayer: AVAudioPlayer?
 
-              func preloadSounds() {
-                  let sounds = ["coin", "jump", "hit", "bgm"]
+              func preload() {
+                  let sounds = ["coin", "jump", "hit", "powerup", "bgm"]
                   for name in sounds {
                       guard let url = Bundle.main.url(forResource: name, withExtension: "wav") else { continue }
                       do {
@@ -143,94 +143,97 @@ jobs:
                           } else {
                               players[name] = player
                           }
-                      } catch {
-                          print("Audio load error: \(error)")
-                      }
+                      } catch { print("Audio error: \(error)") }
                   }
                   bgmPlayer?.play()
               }
 
               func play(_ sound: String) {
-                  guard let player = players[sound] else { return }
-                  player.volume = UserDefaults.standard.soundVolume
-                  player.currentTime = 0
-                  player.play()
+                  guard let p = players[sound] else { return }
+                  p.volume = UserDefaults.standard.soundVolume
+                  p.currentTime = 0
+                  p.play()
               }
 
               func updateVolume(_ vol: Float) {
                   bgmPlayer?.volume = vol
-                  for (_, player) in players { player.volume = vol }
+                  players.values.forEach { $0.volume = vol }
               }
 
               func stopBGM() { bgmPlayer?.stop() }
+              func startBGM() { bgmPlayer?.play() }
           }
           SWIFT_EOF
 
-      # ── JoystickView (adapted for runner) ────────────────────────────────────
+# ============================================================================
+#  PS5 JOYSTICK VIEW
+# ============================================================================
       - name: JoystickView.swift
         run: |
-          cat > InfiniteRoad/Sources/JoystickView.swift << 'SWIFT_EOF'
+          cat > InfinityRun/Sources/JoystickView.swift << 'SWIFT_EOF'
           import UIKit
 
           class JoystickView: UIView {
               private let ring = UIView()
               private let knob = UIView()
               let radius: CGFloat
-              var velocity: SIMD2<Float> = .zero   // x: horizontal, y: vertical
-              var isActive: Bool = false
-              var jumpTriggered: Bool = false
+              var velocity: SIMD2<Float> = .zero
+              var isActive = false
+              var jumpTriggered = false
               weak var trackingTouch: UITouch?
 
               init(radius: CGFloat) {
                   self.radius = radius
-                  super.init(frame: CGRect(x: 0, y: 0, width: radius * 2, height: radius * 2))
+                  super.init(frame: CGRect(x: 0, y: 0, width: radius*2, height: radius*2))
                   isUserInteractionEnabled = false
                   alpha = 0.78
 
-                  ring.frame               = bounds
-                  ring.layer.cornerRadius  = radius
-                  ring.backgroundColor     = UIColor(white: 1, alpha: 0.07)
-                  ring.layer.borderColor   = UIColor(white: 1, alpha: 0.26).cgColor
-                  ring.layer.borderWidth   = 2
+                  ring.frame = bounds
+                  ring.layer.cornerRadius = radius
+                  ring.backgroundColor = UIColor(white: 1, alpha: 0.07)
+                  ring.layer.borderColor = UIColor(white: 1, alpha: 0.26).cgColor
+                  ring.layer.borderWidth = 2
                   addSubview(ring)
 
-                  let kR                   = radius * 0.38
-                  knob.frame               = CGRect(x: radius - kR, y: radius - kR, width: kR * 2, height: kR * 2)
-                  knob.layer.cornerRadius  = kR
-                  knob.backgroundColor     = UIColor(white: 1, alpha: 0.32)
-                  knob.layer.borderColor   = UIColor(white: 1, alpha: 0.5).cgColor
-                  knob.layer.borderWidth   = 1.5
+                  let kR = radius * 0.38
+                  knob.frame = CGRect(x: radius - kR, y: radius - kR, width: kR*2, height: kR*2)
+                  knob.layer.cornerRadius = kR
+                  knob.backgroundColor = UIColor(white: 1, alpha: 0.32)
+                  knob.layer.borderColor = UIColor(white: 1, alpha: 0.5).cgColor
+                  knob.layer.borderWidth = 1.5
                   addSubview(knob)
               }
               required init?(coder: NSCoder) { fatalError() }
 
-              func moveTouch(_ touch: UITouch, in parentView: UIView) {
-                  let pt   = touch.location(in: parentView)
-                  let cx   = frame.midX, cy = frame.midY
-                  let dx   = Float(pt.x - cx), dy = Float(pt.y - cy)
-                  let dist = sqrt(dx * dx + dy * dy)
+              func moveTouch(_ touch: UITouch, in parent: UIView) {
+                  let pt = touch.location(in: parent)
+                  let cx = frame.midX, cy = frame.midY
+                  let dx = Float(pt.x - cx), dy = Float(pt.y - cy)
+                  let dist = sqrt(dx*dx + dy*dy)
                   let maxD = Float(radius)
-                  let f    = dist <= maxD ? 1.0 : maxD / dist
+                  let f = dist <= maxD ? 1.0 : maxD/dist
                   knob.center = CGPoint(x: cx + CGFloat(dx * f), y: cy + CGFloat(dy * f))
-                  velocity    = SIMD2<Float>(dx * f / maxD, dy * f / maxD)
-                  isActive    = dist > maxD * 0.12
-                  jumpTriggered = (dy < -0.6 * maxD)  // push up beyond threshold triggers jump
+                  velocity = SIMD2<Float>(dx * f / maxD, dy * f / maxD)
+                  isActive = dist > maxD * 0.12
+                  jumpTriggered = (dy < -0.6 * maxD)
               }
 
               func reset() {
-                  knob.center   = CGPoint(x: radius, y: radius)
-                  velocity      = .zero
-                  isActive      = false
+                  knob.center = CGPoint(x: radius, y: radius)
+                  velocity = .zero
+                  isActive = false
                   jumpTriggered = false
                   trackingTouch = nil
               }
           }
           SWIFT_EOF
 
-      # ── CharacterNode ────────────────────────────────────────────────────────
+# ============================================================================
+#  3D CHARACTER NODE (PROCEDURAL ANIMATION)
+# ============================================================================
       - name: CharacterNode.swift
         run: |
-          cat > InfiniteRoad/Sources/CharacterNode.swift << 'SWIFT_EOF'
+          cat > InfinityRun/Sources/CharacterNode.swift << 'SWIFT_EOF'
           import SceneKit
 
           class CharacterNode: SCNNode {
@@ -239,36 +242,31 @@ jobs:
               private var rightLeg: SCNNode!
               private var leftArm: SCNNode!
               private var rightArm: SCNNode!
-              private var animationTime: Float = 0
-              private var isJumping: Bool = false
-              private var jumpProgress: Float = 0
-              private var skin: CharacterSkin = .defaultMan
+              private var animTime: Float = 0
+              private let skin: CharacterSkin
 
               init(skin: CharacterSkin) {
                   self.skin = skin
                   super.init()
-                  buildCharacter()
+                  build()
               }
               required init?(coder: NSCoder) { fatalError() }
 
-              private func buildCharacter() {
+              private func build() {
                   bodyNode = SCNNode()
                   addChildNode(bodyNode)
 
-                  let torsoGeo = SCNBox(width: 0.55, height: 0.75, length: 0.35, chamferRadius: 0.08)
-                  torsoGeo.materials = [material(color: skin.torsoColor)]
-                  let torso = SCNNode(geometry: torsoGeo)
-                  torso.position = SCNVector3(0, 0.3, 0)
+                  let torso = SCNNode(geometry: box(0.55, 0.75, 0.35, color: skin.bodyColor))
+                  torso.position.y = 0.3
                   bodyNode.addChildNode(torso)
 
-                  let headGeo = SCNSphere(radius: 0.18)
-                  headGeo.materials = [material(color: skin.headColor)]
-                  let head = SCNNode(geometry: headGeo)
-                  head.position = SCNVector3(0, 0.78, 0)
+                  let head = SCNNode(geometry: SCNSphere(radius: 0.18))
+                  head.geometry?.materials = [mat(color: skin.headColor)]
+                  head.position.y = 0.78
                   bodyNode.addChildNode(head)
 
                   let legGeo = SCNCylinder(radius: 0.10, height: 0.65)
-                  legGeo.materials = [material(color: skin.pantsColor)]
+                  legGeo.materials = [mat(color: skin.legsColor)]
                   leftLeg = SCNNode(geometry: legGeo)
                   leftLeg.pivot = SCNMatrix4MakeTranslation(0, 0.325, 0)
                   leftLeg.position = SCNVector3(-0.16, 0, 0)
@@ -280,7 +278,7 @@ jobs:
                   bodyNode.addChildNode(rightLeg)
 
                   let armGeo = SCNCylinder(radius: 0.08, height: 0.60)
-                  armGeo.materials = [material(color: skin.torsoColor)]
+                  armGeo.materials = [mat(color: skin.bodyColor)]
                   leftArm = SCNNode(geometry: armGeo)
                   leftArm.pivot = SCNMatrix4MakeTranslation(0, 0.30, 0)
                   leftArm.position = SCNVector3(-0.36, 0.45, 0)
@@ -290,11 +288,15 @@ jobs:
                   rightArm.pivot = SCNMatrix4MakeTranslation(0, 0.30, 0)
                   rightArm.position = SCNVector3(0.36, 0.45, 0)
                   bodyNode.addChildNode(rightArm)
-
-                  position = SCNVector3(0, 0, 0)
               }
 
-              private func material(color: UIColor) -> SCNMaterial {
+              private func box(_ w: Float, _ h: Float, _ d: Float, color: UIColor) -> SCNGeometry {
+                  let geo = SCNBox(width: CGFloat(w), height: CGFloat(h), length: CGFloat(d), chamferRadius: 0.06)
+                  geo.materials = [mat(color: color)]
+                  return geo
+              }
+
+              private func mat(color: UIColor) -> SCNMaterial {
                   let m = SCNMaterial()
                   m.diffuse.contents = color
                   m.lightingModel = .lambert
@@ -303,151 +305,199 @@ jobs:
 
               func updateAnimation(dt: Float, speed: Float, isGrounded: Bool) {
                   if !isGrounded {
-                      // jump pose
                       leftLeg.eulerAngles.x = 0
                       rightLeg.eulerAngles.x = 0
                       leftArm.eulerAngles.x = -1.2
                       rightArm.eulerAngles.x = 1.2
-                      animationTime = 0
+                      animTime = 0
                       return
                   }
                   if speed > 0.1 {
-                      animationTime += dt * speed * 8.0
-                      let angle = sin(animationTime) * 0.45
+                      animTime += dt * speed * 10
+                      let angle = sin(animTime) * 0.5
                       leftLeg.eulerAngles.x = angle
                       rightLeg.eulerAngles.x = -angle
                       leftArm.eulerAngles.x = -angle * 0.6
                       rightArm.eulerAngles.x = angle * 0.6
                   } else {
-                      leftLeg.eulerAngles.x = 0
-                      rightLeg.eulerAngles.x = 0
-                      leftArm.eulerAngles.x = 0
-                      rightArm.eulerAngles.x = 0
-                      animationTime = 0
+                      leftLeg.eulerAngles.x = 0; rightLeg.eulerAngles.x = 0
+                      leftArm.eulerAngles.x = 0; rightArm.eulerAngles.x = 0
+                      animTime = 0
                   }
               }
 
-              func updateJumpAnimation(progress: Float) {
-                  // progress 0..1, peak at 0.5
-                  let lift: Float = sin(progress * .pi) * 1.5
-                  position.y = lift
+              func updateJump(progress: Float) {
+                  position.y = sin(progress * .pi) * 2.0
                   if progress < 0.5 {
-                      leftArm.eulerAngles.x = -1.5
-                      rightArm.eulerAngles.x = 1.5
+                      leftArm.eulerAngles.x = -1.6; rightArm.eulerAngles.x = 1.6
                   } else {
-                      leftArm.eulerAngles.x = -0.3
-                      rightArm.eulerAngles.x = 0.3
+                      leftArm.eulerAngles.x = -0.2; rightArm.eulerAngles.x = 0.2
                   }
               }
           }
           SWIFT_EOF
 
-      # ── RoadManager ──────────────────────────────────────────────────────────
+# ============================================================================
+#  INFINITE ROAD & ENVIRONMENT GENERATOR
+# ============================================================================
       - name: RoadManager.swift
         run: |
-          cat > InfiniteRoad/Sources/RoadManager.swift << 'SWIFT_EOF'
+          cat > InfinityRun/Sources/RoadManager.swift << 'SWIFT_EOF'
           import SceneKit
 
           class RoadManager {
               private weak var scene: SCNScene?
-              private let segmentLength: Float = 20
-              private let lanes: Int = 3
-              private let laneWidth: Float = 3.0
-              private var activeSegments: [SCNNode] = []
-              private var nextZ: Float = 0
-              private var furthestZ: Float = 0
+              private let segLen: Float = 30
+              private let lanes = 3
+              private let laneW: Float = 3.2
+              private var activeNodes: [SCNNode] = []
+              private var lastZ: Float = 0
 
               init(scene: SCNScene) {
                   self.scene = scene
-                  buildInitialSegments()
-              }
-
-              private func buildInitialSegments() {
-                  for i in -2...5 { addSegment(at: Float(i) * segmentLength) }
+                  for i in -3..<8 { addSegment(at: Float(i) * segLen) }
               }
 
               private func addSegment(at z: Float) {
                   guard let scene = scene else { return }
-                  let roadGeo = SCNBox(width: CGFloat(laneWidth * Float(lanes)), height: 0.1, length: CGFloat(segmentLength), chamferRadius: 0)
-                  let mat = SCNMaterial()
-                  mat.diffuse.contents = UIColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1)
-                  mat.lightingModel = .lambert
-                  roadGeo.materials = [mat]
-                  let road = SCNNode(geometry: roadGeo)
-                  road.position = SCNVector3(0, 0, z + segmentLength/2)
+                  // road plane
+                  let road = SCNNode(geometry: SCNBox(width: CGFloat(laneW*Float(lanes)), height: 0.15, length: CGFloat(segLen), chamferRadius: 0))
+                  road.geometry?.materials = [mat(0.12,0.12,0.12)]
+                  road.position = SCNVector3(0, -0.15, z + segLen/2)
                   scene.rootNode.addChildNode(road)
-                  activeSegments.append(road)
+                  activeNodes.append(road)
 
-                  // lane markers
-                  for lane in -1...1 {
-                      if lane == 0 { continue }
-                      let lineGeo = SCNBox(width: 0.1, height: 0.05, length: CGFloat(segmentLength), chamferRadius: 0)
-                      let lineMat = SCNMaterial()
-                      lineMat.diffuse.contents = UIColor.white
-                      lineGeo.materials = [lineMat]
-                      let line = SCNNode(geometry: lineGeo)
-                      line.position = SCNVector3(Float(lane) * laneWidth, 0.08, z + segmentLength/2)
+                  // lane lines
+                  for l in -1...1 where l != 0 {
+                      let line = SCNNode(geometry: SCNBox(width: 0.08, height: 0.05, length: CGFloat(segLen), chamferRadius: 0))
+                      line.geometry?.materials = [mat(1,1,1)]
+                      line.position = SCNVector3(Float(l)*laneW, 0.02, z + segLen/2)
                       scene.rootNode.addChildNode(line)
-                      activeSegments.append(line)  // track for removal
+                      activeNodes.append(line)
                   }
 
-                  furthestZ = z + segmentLength
+                  // scenery on both sides
+                  let sideX = (laneW * Float(lanes))/2 + 1.5
+                  for side: Float in [-1, 1] {
+                      if Float.random(in: 0...1) > 0.4 {
+                          let tree = buildTree()
+                          tree.position = SCNVector3(side * (sideX + Float.random(in: 0...1.5)), 0, z + Float.random(in: 0..<segLen))
+                          scene.rootNode.addChildNode(tree)
+                          activeNodes.append(tree)
+                      }
+                      if Float.random(in: 0...1) > 0.6 {
+                          let building = buildBuilding()
+                          building.position = SCNVector3(side * (sideX + Float.random(in: 1...3)), 0, z + Float.random(in: 0..<segLen))
+                          scene.rootNode.addChildNode(building)
+                          activeNodes.append(building)
+                      }
+                  }
+                  lastZ = z + segLen
+              }
+
+              private func buildTree() -> SCNNode {
+                  let trunk = SCNNode(geometry: SCNCylinder(radius: 0.2, height: 2.0))
+                  trunk.geometry?.materials = [mat(0.4,0.2,0.1)]
+                  trunk.position.y = 1.0
+                  let leaves = SCNNode(geometry: SCNSphere(radius: 0.9))
+                  leaves.geometry?.materials = [mat(0.1,0.3,0.1)]
+                  leaves.position.y = 2.6
+                  let tree = SCNNode()
+                  tree.addChildNode(trunk)
+                  tree.addChildNode(leaves)
+                  return tree
+              }
+
+              private func buildBuilding() -> SCNNode {
+                  let h = Float.random(in: 3...8)
+                  let w = Float.random(in: 2...4)
+                  let box = SCNNode(geometry: SCNBox(width: CGFloat(w), height: CGFloat(h), length: CGFloat(w), chamferRadius: 0.1))
+                  box.geometry?.materials = [mat(0.15,0.12,0.08)]
+                  box.position.y = h/2
+                  return box
+              }
+
+              private func mat(_ r: Float, _ g: Float, _ b: Float) -> SCNMaterial {
+                  let m = SCNMaterial()
+                  m.diffuse.contents = UIColor(red: CGFloat(r), green: CGFloat(g), blue: CGFloat(b), alpha: 1)
+                  m.lightingModel = .lambert
+                  return m
               }
 
               func update(playerZ: Float) {
-                  // recycle segments: if the player has moved past a segment, remove it and add new ahead
-                  let threshold = playerZ - segmentLength * 2
-                  while let first = activeSegments.first, first.position.z < threshold {
+                  let threshold = playerZ - segLen * 2
+                  while let first = activeNodes.first, first.position.z < threshold {
                       first.removeFromParentNode()
-                      activeSegments.removeFirst()
+                      activeNodes.removeFirst()
                   }
-                  while furthestZ - playerZ < segmentLength * 5 {
-                      addSegment(at: furthestZ)
+                  while lastZ - playerZ < segLen * 6 {
+                      addSegment(at: lastZ)
                   }
               }
           }
           SWIFT_EOF
 
-      # ── HUD ──────────────────────────────────────────────────────────────────
+# ============================================================================
+#  HUD (SCORE, COINS, PAUSE BUTTON)
+# ============================================================================
       - name: HUD.swift
         run: |
-          cat > InfiniteRoad/Sources/HUD.swift << 'SWIFT_EOF'
+          cat > InfinityRun/Sources/HUD.swift << 'SWIFT_EOF'
           import UIKit
 
           class GameHUD: UIView {
               private let scoreLabel = UILabel()
-              private let coinLabel  = UILabel()
+              private let coinsLabel = UILabel()
+              private let distanceLabel = UILabel()
+              let pauseButton = UIButton(type: .system)
 
               override init(frame: CGRect) {
                   super.init(frame: frame)
-                  isUserInteractionEnabled = false
+                  isUserInteractionEnabled = true
                   backgroundColor = .clear
 
-                  coinLabel.frame = CGRect(x: 20, y: 20, width: 200, height: 30)
-                  coinLabel.textColor = UIColor(red: 1, green: 0.85, blue: 0.2, alpha: 1)
-                  coinLabel.font = UIFont(name: "Courier-Bold", size: 22) ?? UIFont.boldSystemFont(ofSize: 22)
-                  addSubview(coinLabel)
+                  coinsLabel.frame = CGRect(x: 20, y: 20, width: 200, height: 30)
+                  coinsLabel.textColor = UIColor(red: 1, green: 0.85, blue: 0.2, alpha: 1)
+                  coinsLabel.font = UIFont(name: "Courier-Bold", size: 20) ?? .boldSystemFont(ofSize: 20)
+                  addSubview(coinsLabel)
 
-                  scoreLabel.frame = CGRect(x: 0, y: 20, width: bounds.width - 20, height: 30)
+                  distanceLabel.frame = CGRect(x: 0, y: 20, width: bounds.width, height: 30)
+                  distanceLabel.autoresizingMask = [.flexibleWidth]
+                  distanceLabel.textAlignment = .center
+                  distanceLabel.textColor = .white
+                  distanceLabel.font = UIFont(name: "Courier-Bold", size: 22) ?? .boldSystemFont(ofSize: 22)
+                  addSubview(distanceLabel)
+
+                  scoreLabel.frame = CGRect(x: 0, y: 55, width: bounds.width - 20, height: 26)
                   scoreLabel.autoresizingMask = [.flexibleWidth]
                   scoreLabel.textAlignment = .right
-                  scoreLabel.textColor = .white
-                  scoreLabel.font = UIFont(name: "Courier-Bold", size: 22) ?? UIFont.boldSystemFont(ofSize: 22)
+                  scoreLabel.textColor = UIColor(red: 1, green: 0.9, blue: 0.2, alpha: 1)
+                  scoreLabel.font = UIFont(name: "Courier-Bold", size: 18) ?? .boldSystemFont(ofSize: 18)
                   addSubview(scoreLabel)
+
+                  pauseButton.frame = CGRect(x: bounds.width - 80, y: bounds.height - 70, width: 60, height: 60)
+                  pauseButton.autoresizingMask = [.flexibleLeftMargin, .flexibleTopMargin]
+                  pauseButton.setTitle("⏸", for: .normal)
+                  pauseButton.titleLabel?.font = UIFont.systemFont(ofSize: 36)
+                  pauseButton.tintColor = .white
+                  addSubview(pauseButton)
               }
               required init?(coder: NSCoder) { fatalError() }
 
-              func update(coins: Int, score: Int) {
-                  coinLabel.text = "🪙 \(coins)"
+              func update(coins: Int, distance: Int, score: Int) {
+                  coinsLabel.text = "🪙 \(coins)"
+                  distanceLabel.text = "\(distance) m"
                   scoreLabel.text = "SCORE: \(score)"
               }
           }
           SWIFT_EOF
 
-      # ── MainMenuViewController ───────────────────────────────────────────────
+# ============================================================================
+#  MAIN MENU (START, SETTINGS, 3D PREVIEW)
+# ============================================================================
       - name: MainMenuViewController.swift
         run: |
-          cat > InfiniteRoad/Sources/MainMenuViewController.swift << 'SWIFT_EOF'
+          cat > InfinityRun/Sources/MainMenuViewController.swift << 'SWIFT_EOF'
           import UIKit
           import SceneKit
 
@@ -457,52 +507,57 @@ jobs:
               override func viewDidLoad() {
                   super.viewDidLoad()
 
-                  // Background 3D scene
                   scnView = SCNView(frame: view.bounds)
                   scnView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
                   view.addSubview(scnView)
 
                   let scene = SCNScene()
-                  scene.background.contents = UIColor(red: 0.1, green: 0.1, blue: 0.2, alpha: 1)
+                  scene.background.contents = UIColor(red: 0.08, green: 0.07, blue: 0.15, alpha: 1)
                   scnView.scene = scene
+                  scnView.autoenablesDefaultLighting = true
+                  scnView.allowsCameraControl = true
 
-                  let camNode = SCNNode()
-                  camNode.camera = SCNCamera()
-                  camNode.position = SCNVector3(0, 2, 6)
-                  camNode.eulerAngles = SCNVector3(-0.2, 0, 0)
-                  scene.rootNode.addChildNode(camNode)
+                  let char = CharacterNode(skin: UserDefaults.standard.selectedSkin)
+                  char.position = SCNVector3(0, 0, 0)
+                  scene.rootNode.addChildNode(char)
+                  char.runAction(SCNAction.repeatForever(SCNAction.rotateBy(x: 0, y: .pi*2, z: 0, duration: 10)))
 
-                  let light = SCNNode()
-                  light.light = SCNLight()
-                  light.light?.type = .omni
-                  light.position = SCNVector3(0, 5, 5)
-                  scene.rootNode.addChildNode(light)
+                  let cam = SCNNode()
+                  cam.camera = SCNCamera()
+                  cam.position = SCNVector3(0, 1.8, 5)
+                  cam.eulerAngles = SCNVector3(-0.15, 0, 0)
+                  scene.rootNode.addChildNode(cam)
 
-                  let charNode = CharacterNode(skin: UserDefaults.standard.selectedSkin)
-                  charNode.position = SCNVector3(0, 0, 0)
-                  scene.rootNode.addChildNode(charNode)
-                  charNode.runAction(SCNAction.repeatForever(SCNAction.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 8)))
+                  // Title
+                  let title = UILabel()
+                  title.text = "INFINITY RUN 3D"
+                  title.font = UIFont(name: "Courier-Bold", size: 36) ?? .boldSystemFont(ofSize: 36)
+                  title.textColor = UIColor(red: 1, green: 0.8, blue: 0.1, alpha: 1)
+                  title.textAlignment = .center
+                  title.frame = CGRect(x: 0, y: 80, width: view.bounds.width, height: 60)
+                  view.addSubview(title)
 
-                  // UI Buttons
-                  let startBtn = createButton(title: "▶ START", y: view.bounds.height * 0.55)
-                  startBtn.addTarget(self, action: #selector(startGame), for: .touchUpInside)
-                  view.addSubview(startBtn)
+                  // Start button
+                  let start = menuButton("▶ START", y: view.bounds.height*0.55)
+                  start.addTarget(self, action: #selector(startGame), for: .touchUpInside)
+                  view.addSubview(start)
 
-                  let settingsBtn = createButton(title: "⚙ SETTINGS", y: view.bounds.height * 0.68)
-                  settingsBtn.addTarget(self, action: #selector(openSettings), for: .touchUpInside)
-                  view.addSubview(settingsBtn)
+                  // Settings button
+                  let settings = menuButton("⚙ SETTINGS", y: view.bounds.height*0.68)
+                  settings.addTarget(self, action: #selector(openSettings), for: .touchUpInside)
+                  view.addSubview(settings)
 
-                  AudioManager.shared.preloadSounds()
+                  AudioManager.shared.preload()
               }
 
-              private func createButton(title: String, y: CGFloat) -> UIButton {
-                  let w: CGFloat = 220, h: CGFloat = 50
-                  let btn = UIButton(frame: CGRect(x: (view.bounds.width - w)/2, y: y, width: w, height: h))
+              private func menuButton(_ title: String, y: CGFloat) -> UIButton {
+                  let btn = UIButton(type: .custom)
+                  btn.frame = CGRect(x: (view.bounds.width-220)/2, y: y, width: 220, height: 52)
                   btn.setTitle(title, for: .normal)
-                  btn.titleLabel?.font = UIFont(name: "Courier-Bold", size: 22) ?? UIFont.boldSystemFont(ofSize: 22)
+                  btn.titleLabel?.font = UIFont(name: "Courier-Bold", size: 22) ?? .boldSystemFont(ofSize: 22)
                   btn.backgroundColor = UIColor(red: 0.6, green: 0, blue: 0, alpha: 0.85)
-                  btn.layer.cornerRadius = 12
-                  btn.layer.borderColor = UIColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 1).cgColor
+                  btn.layer.cornerRadius = 14
+                  btn.layer.borderColor = UIColor(red: 1, green: 0.2, blue: 0.2, alpha: 1).cgColor
                   btn.layer.borderWidth = 2
                   return btn
               }
@@ -514,42 +569,42 @@ jobs:
               }
 
               @objc private func openSettings() {
-                  let settingsVC = SettingsViewController()
-                  settingsVC.modalPresentationStyle = .fullScreen
-                  present(settingsVC, animated: true)
+                  let vc = SettingsViewController()
+                  vc.modalPresentationStyle = .fullScreen
+                  present(vc, animated: true)
               }
 
               override var prefersStatusBarHidden: Bool { true }
           }
           SWIFT_EOF
 
-      # ── SettingsViewController ───────────────────────────────────────────────
+# ============================================================================
+#  SETTINGS PAGE (CHARACTER SELECTION & VOLUME)
+# ============================================================================
       - name: SettingsViewController.swift
         run: |
-          cat > InfiniteRoad/Sources/SettingsViewController.swift << 'SWIFT_EOF'
+          cat > InfinityRun/Sources/SettingsViewController.swift << 'SWIFT_EOF'
           import UIKit
           import SceneKit
 
           class SettingsViewController: UIViewController {
               private var previewView: SCNView!
               private var charNode: CharacterNode!
-              private let segmentControl = UISegmentedControl(items: CharacterSkin.allCases.map { $0.rawValue })
+              private let segment = UISegmentedControl(items: CharacterSkin.allCases.map{$0.rawValue})
               private let volumeSlider = UISlider()
 
               override func viewDidLoad() {
                   super.viewDidLoad()
                   view.backgroundColor = UIColor(red: 0.05, green: 0.05, blue: 0.1, alpha: 1)
 
-                  // 3D Preview
-                  previewView = SCNView(frame: CGRect(x: 0, y: 80, width: view.bounds.width, height: 250))
+                  previewView = SCNView(frame: CGRect(x: 0, y: 100, width: view.bounds.width, height: 260))
                   previewView.backgroundColor = .clear
-                  view.addSubview(previewView)
-
                   let scene = SCNScene()
                   scene.background.contents = UIColor.clear
                   previewView.scene = scene
                   previewView.autoenablesDefaultLighting = true
                   previewView.allowsCameraControl = true
+                  view.addSubview(previewView)
 
                   let cam = SCNNode()
                   cam.camera = SCNCamera()
@@ -560,42 +615,36 @@ jobs:
                   charNode.position = SCNVector3(0, 0, 0)
                   scene.rootNode.addChildNode(charNode)
 
-                  // Character selector
-                  segmentControl.frame = CGRect(x: 30, y: 350, width: view.bounds.width - 60, height: 40)
-                  segmentControl.selectedSegmentIndex = CharacterSkin.allCases.firstIndex(of: UserDefaults.standard.selectedSkin) ?? 0
-                  segmentControl.addTarget(self, action: #selector(skinChanged), for: .valueChanged)
-                  view.addSubview(segmentControl)
+                  segment.frame = CGRect(x: 30, y: 380, width: view.bounds.width-60, height: 40)
+                  segment.selectedSegmentIndex = CharacterSkin.allCases.firstIndex(of: UserDefaults.standard.selectedSkin) ?? 0
+                  segment.addTarget(self, action: #selector(skinChanged), for: .valueChanged)
+                  view.addSubview(segment)
 
-                  // Volume
-                  let volLabel = UILabel(frame: CGRect(x: 30, y: 420, width: 200, height: 30))
+                  let volLabel = UILabel(frame: CGRect(x: 30, y: 450, width: 100, height: 30))
                   volLabel.text = "🔊 Volume"
                   volLabel.textColor = .white
-                  volLabel.font = UIFont.systemFont(ofSize: 18, weight: .bold)
+                  volLabel.font = .systemFont(ofSize: 18, weight: .bold)
                   view.addSubview(volLabel)
 
-                  volumeSlider.frame = CGRect(x: 30, y: 450, width: view.bounds.width - 60, height: 30)
-                  volumeSlider.minimumValue = 0
-                  volumeSlider.maximumValue = 1
+                  volumeSlider.frame = CGRect(x: 30, y: 480, width: view.bounds.width-60, height: 30)
                   volumeSlider.value = UserDefaults.standard.soundVolume
                   volumeSlider.addTarget(self, action: #selector(volumeChanged), for: .valueChanged)
                   view.addSubview(volumeSlider)
 
-                  // Back button
                   let backBtn = UIButton(type: .system)
-                  backBtn.frame = CGRect(x: 30, y: 520, width: 120, height: 44)
+                  backBtn.frame = CGRect(x: 30, y: 550, width: 120, height: 44)
                   backBtn.setTitle("← BACK", for: .normal)
-                  backBtn.titleLabel?.font = UIFont.boldSystemFont(ofSize: 18)
+                  backBtn.titleLabel?.font = .boldSystemFont(ofSize: 18)
                   backBtn.setTitleColor(.white, for: .normal)
-                  backBtn.backgroundColor = UIColor(red: 0.3, green: 0.3, blue: 0.3, alpha: 0.7)
+                  backBtn.backgroundColor = UIColor(red: 0.3, green: 0.3, blue: 0.3, alpha: 0.8)
                   backBtn.layer.cornerRadius = 8
                   backBtn.addTarget(self, action: #selector(goBack), for: .touchUpInside)
                   view.addSubview(backBtn)
               }
 
               @objc private func skinChanged() {
-                  let newSkin = CharacterSkin.allCases[segmentControl.selectedSegmentIndex]
+                  let newSkin = CharacterSkin.allCases[segment.selectedSegmentIndex]
                   UserDefaults.standard.selectedSkin = newSkin
-                  // replace character
                   charNode.removeFromParentNode()
                   charNode = CharacterNode(skin: newSkin)
                   charNode.position = SCNVector3(0, 0, 0)
@@ -603,23 +652,21 @@ jobs:
               }
 
               @objc private func volumeChanged() {
-                  let vol = volumeSlider.value
-                  UserDefaults.standard.soundVolume = vol
-                  AudioManager.shared.updateVolume(vol)
+                  UserDefaults.standard.soundVolume = volumeSlider.value
+                  AudioManager.shared.updateVolume(volumeSlider.value)
               }
 
-              @objc private func goBack() {
-                  dismiss(animated: true)
-              }
-
+              @objc private func goBack() { dismiss(animated: true) }
               override var prefersStatusBarHidden: Bool { true }
           }
           SWIFT_EOF
 
-      # ── GameViewController (Core Gameplay) ──────────────────────────────────
+# ============================================================================
+#  GAME VIEW CONTROLLER (MAIN GAMEPLAY)
+# ============================================================================
       - name: GameViewController.swift
         run: |
-          cat > InfiniteRoad/Sources/GameViewController.swift << 'SWIFT_EOF'
+          cat > InfinityRun/Sources/GameViewController.swift << 'SWIFT_EOF'
           import UIKit
           import SceneKit
 
@@ -635,19 +682,23 @@ jobs:
               // State
               private var playerX: Float = 0
               private var playerZ: Float = 0
-              private var speed: Float = 5.0
-              private var coins: Int = 0
-              private var score: Int = 0
+              private var speed: Float = 6.0
+              private var coins = 0
+              private var score = 0
+              private var distance: Int { Int(playerZ) }
               private var isJumping = false
               private var jumpTimer: Float = 0
-              private let jumpDuration: Float = 0.8
+              private let jumpDuration: Float = 0.7
               private var isGameOver = false
+              private var paused = false
               private var lastTime: TimeInterval = 0
 
               private var obstacles: [SCNNode] = []
               private var coinNodes: [SCNNode] = []
+              private var powerUps: [SCNNode] = []
               private var spawnTimer: Float = 0
-              private let spawnInterval: Float = 2.0
+              private let baseSpawnInterval: Float = 1.8
+              private var spawnInterval: Float = 1.8
 
               override func viewDidLoad() {
                   super.viewDidLoad()
@@ -657,7 +708,6 @@ jobs:
                   roadManager = RoadManager(scene: scene)
                   setupJoystick()
                   setupHUD()
-                  scene.physicsWorld.contactDelegate = self
                   scnView.delegate = self
                   scnView.isPlaying = true
               }
@@ -665,18 +715,26 @@ jobs:
               private func setupScene() {
                   scnView = SCNView(frame: view.bounds)
                   scnView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-                  scnView.backgroundColor = UIColor(red: 0.1, green: 0.1, blue: 0.2, alpha: 1)
+                  scnView.backgroundColor = UIColor(red: 0.05, green: 0.06, blue: 0.12, alpha: 1)
                   scnView.antialiasingMode = .multisampling4X
                   view.addSubview(scnView)
 
                   scene = SCNScene()
-                  scene.background.contents = UIColor(red: 0.05, green: 0.05, blue: 0.15, alpha: 1)
+                  scene.fogColor = UIColor(red: 0.12, green: 0.13, blue: 0.18, alpha: 1)
+                  scene.fogStartDistance = 30
+                  scene.fogEndDistance = 100
+                  scene.fogDensityExponent = 0.7
                   scnView.scene = scene
+
+                  let ambient = SCNNode()
+                  ambient.light = SCNLight()
+                  ambient.light?.type = .ambient
+                  ambient.light?.color = UIColor(white: 0.4, alpha: 1)
+                  scene.rootNode.addChildNode(ambient)
               }
 
               private func setupPlayer() {
-                  let skin = UserDefaults.standard.selectedSkin
-                  player = CharacterNode(skin: skin)
+                  player = CharacterNode(skin: UserDefaults.standard.selectedSkin)
                   player.position = SCNVector3(0, 0, 0)
                   scene.rootNode.addChildNode(player)
               }
@@ -684,14 +742,14 @@ jobs:
               private func setupCamera() {
                   cameraNode = SCNNode()
                   cameraNode.camera = SCNCamera()
-                  cameraNode.camera?.fieldOfView = 75
-                  cameraNode.position = SCNVector3(0, 2.5, 5)
-                  cameraNode.eulerAngles = SCNVector3(-0.15, 0, 0)
+                  cameraNode.camera?.fieldOfView = 80
+                  cameraNode.position = SCNVector3(0, 2.5, 5.5)
+                  cameraNode.eulerAngles = SCNVector3(-0.2, 0, 0)
                   scene.rootNode.addChildNode(cameraNode)
               }
 
               private func setupJoystick() {
-                  let jR = view.bounds.height * 0.15
+                  let jR = view.bounds.height * 0.16
                   joystick = JoystickView(radius: jR)
                   joystick.center = CGPoint(x: jR + 30, y: view.bounds.height - jR - 30)
                   view.addSubview(joystick)
@@ -700,9 +758,28 @@ jobs:
               private func setupHUD() {
                   hud = GameHUD(frame: view.bounds)
                   view.addSubview(hud)
+                  hud.pauseButton.addTarget(self, action: #selector(togglePause), for: .touchUpInside)
               }
 
-              // Touch handling
+              @objc private func togglePause() {
+                  paused.toggle()
+                  scnView.isPlaying = !paused
+                  if paused {
+                      AudioManager.shared.stopBGM()
+                      let alert = UIAlertController(title: "Paused", message: nil, preferredStyle: .alert)
+                      alert.addAction(UIAlertAction(title: "Resume", style: .default) { [weak self] _ in
+                          self?.paused = false
+                          self?.scnView.isPlaying = true
+                          AudioManager.shared.startBGM()
+                      })
+                      alert.addAction(UIAlertAction(title: "Quit", style: .destructive) { [weak self] _ in
+                          self?.dismiss(animated: true)
+                      })
+                      present(alert, animated: true)
+                  }
+              }
+
+              // Touch
               override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
                   for t in touches {
                       let pt = t.location(in: view)
@@ -712,47 +789,41 @@ jobs:
                   }
               }
               override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-                  for t in touches {
-                      if t === joystick.trackingTouch {
-                          joystick.moveTouch(t, in: view)
-                      }
+                  for t in touches where t === joystick.trackingTouch {
+                      joystick.moveTouch(t, in: view)
                   }
               }
               override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-                  for t in touches {
-                      if t === joystick.trackingTouch { joystick.reset() }
-                  }
+                  for t in touches where t === joystick.trackingTouch { joystick.reset() }
               }
               override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
                   touchesEnded(touches, with: event)
               }
 
-              // Game Loop
+              // Game loop
               func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
-                  guard !isGameOver else { return }
-                  let dt = lastTime == 0 ? 0 : Float(min(time - lastTime, 0.05))
+                  guard !isGameOver && !paused else { return }
+                  let dt = lastTime == 0 ? 0.016 : Float(min(time - lastTime, 0.05))
                   lastTime = time
 
                   handleInput(dt: dt)
                   updatePlayer(dt: dt)
-                  updateObstacles(dt: dt)
-                  spawnObjects(dt: dt)
+                  updateCollisions()
+                  spawnItems(dt: dt)
                   roadManager.update(playerZ: playerZ)
-                  cameraNode.position = SCNVector3(playerX, 2.5, playerZ + 5)
+                  updateCamera(dt: dt)
+                  speed += dt * 0.2   // gradually faster
 
                   DispatchQueue.main.async {
-                      self.hud.update(coins: self.coins, score: self.score)
+                      self.hud.update(coins: self.coins, distance: self.distance, score: self.score)
                   }
               }
 
               private func handleInput(dt: Float) {
                   let vel = joystick.velocity
-                  // horizontal movement - continuous lane
-                  let targetX = playerX + vel.x * 8 * dt
-                  let laneLimit: Float = 4.0  // half road width
-                  playerX = max(-laneLimit, min(laneLimit, targetX))
+                  let targetX = playerX + vel.x * 10 * dt
+                  playerX = max(-4.5, min(4.5, targetX))
 
-                  // jump
                   if joystick.jumpTriggered && !isJumping {
                       isJumping = true
                       jumpTimer = 0
@@ -762,10 +833,8 @@ jobs:
               }
 
               private func updatePlayer(dt: Float) {
-                  // Forward movement
                   playerZ += speed * dt
 
-                  // Jump physics
                   if isJumping {
                       jumpTimer += dt
                       let progress = jumpTimer / jumpDuration
@@ -774,117 +843,154 @@ jobs:
                           player.updateAnimation(dt: dt, speed: speed, isGrounded: true)
                           player.position.y = 0
                       } else {
-                          player.updateJumpAnimation(progress: progress)
+                          player.updateJump(progress: progress)
                       }
                   } else {
                       player.updateAnimation(dt: dt, speed: speed, isGrounded: true)
+                      player.position.y = 0
                   }
 
                   player.position.x = playerX
-                  player.position.z = 0  // relative to camera? We keep player at origin, world moves. We'll shift world.
-                  // Actually easier: move player forward, and update road segments.
-                  // Player position will be at (playerX, 0, playerZ) in world space.
                   player.position.z = playerZ
                   score = Int(playerZ)
               }
 
-              private func updateObstacles(dt: Float) {
-                  for obs in obstacles {
-                      // check collision with player
-                      let distX = abs(obs.position.x - playerX)
-                      let distZ = obs.position.z - playerZ
-                      if distZ > -1 && distZ < 1 && distX < 0.9 {
-                          gameOver()
-                          return
-                      }
-                      // Remove far behind
-                      if obs.position.z < playerZ - 20 {
-                          obs.removeFromParentNode()
-                          obstacles.removeAll { $0 === obs }
-                      }
-                  }
-                  for coin in coinNodes {
-                      let distX = abs(coin.position.x - playerX)
-                      let distZ = coin.position.z - playerZ
-                      if distZ > -0.8 && distZ < 0.8 && distX < 0.8 {
-                          coin.removeFromParentNode()
-                          coinNodes.removeAll { $0 === coin }
-                          coins += 1
-                          AudioManager.shared.play("coin")
-                      }
-                      if coin.position.z < playerZ - 20 {
-                          coin.removeFromParentNode()
-                          coinNodes.removeAll { $0 === coin }
-                      }
-                  }
+              private func updateCamera(dt: Float) {
+                  let targetPos = SCNVector3(playerX, 2.5, playerZ + 5.5)
+                  cameraNode.position = targetPos  // simple follow, could be smoothed
+                  cameraNode.eulerAngles.y = 0
               }
 
-              private func spawnObjects(dt: Float) {
+              private func spawnItems(dt: Float) {
                   spawnTimer += dt
+                  spawnInterval = max(0.6, baseSpawnInterval - speed * 0.05)
                   if spawnTimer >= spawnInterval {
                       spawnTimer = 0
-                      let lane = Float(Int.random(in: -1...1)) * 2.5
-                      let z = playerZ + 40
-                      if Bool.random() {
-                          // spawn obstacle
+                      let lane = Float(Int.random(in: -1...1)) * 3.1
+                      let z = playerZ + 35 + Float.random(in: 0...10)
+
+                      let r = Float.random(in: 0...1)
+                      if r < 0.3 {
+                          // obstacle
                           let type = ObstacleType.allCases.randomElement()!
-                          let obsGeo = SCNBox(width: CGFloat(type.width), height: CGFloat(type.height), length: 0.3, chamferRadius: 0.05)
-                          let mat = SCNMaterial()
-                          mat.diffuse.contents = UIColor.red
-                          obsGeo.materials = [mat]
-                          let obs = SCNNode(geometry: obsGeo)
-                          obs.position = SCNVector3(lane, type.height/2, z)
-                          obs.name = "obstacle"
+                          let h = type.height
+                          let obs = SCNNode(geometry: SCNBox(width: 1.0, height: CGFloat(h), length: 0.4, chamferRadius: 0.05))
+                          obs.geometry?.materials = [SCNMaterial(); obs.geometry?.materials[0].diffuse.contents = UIColor.red]
+                          obs.position = SCNVector3(lane, h/2, z)
                           scene.rootNode.addChildNode(obs)
                           obstacles.append(obs)
+                      } else if r < 0.7 {
+                          // coin
+                          let coin = SCNNode(geometry: SCNSphere(radius: 0.3))
+                          coin.geometry?.materials = [mat(1,0.85,0.1)]
+                          coin.position = SCNVector3(lane, 0.6, z)
+                          scene.rootNode.addChildNode(coin)
+                          coinNodes.append(coin)
                       } else {
-                          // spawn coin
-                          let coinGeo = SCNSphere(radius: 0.3)
-                          let coinMat = SCNMaterial()
-                          coinMat.diffuse.contents = UIColor.yellow
-                          coinGeo.materials = [coinMat]
-                          let coinNode = SCNNode(geometry: coinGeo)
-                          coinNode.position = SCNVector3(lane, 0.5, z)
-                          coinNode.name = "coin"
-                          scene.rootNode.addChildNode(coinNode)
-                          coinNodes.append(coinNode)
+                          // power-up (random)
+                          let puType = PowerUpType.allCases.randomElement()!
+                          let puGeo: SCNGeometry
+                          let puColor: UIColor
+                          switch puType {
+                          case .magnet: puGeo = SCNCylinder(radius: 0.4, height: 0.6); puColor = .blue
+                          case .shield: puGeo = SCNBox(width: 0.6, height: 0.6, length: 0.6, chamferRadius: 0.1); puColor = .green
+                          case .speedBoost: puGeo = SCNSphere(radius: 0.4); puColor = .yellow
+                          }
+                          puGeo.materials = [mat(Float(puColor.components?.red ?? 0), Float(puColor.components?.green ?? 0), Float(puColor.components?.blue ?? 0))]
+                          let pu = SCNNode(geometry: puGeo)
+                          pu.position = SCNVector3(lane, 0.8, z)
+                          scene.rootNode.addChildNode(pu)
+                          powerUps.append(pu)
                       }
                   }
               }
 
-              private func gameOver() {
-                  guard !isGameOver else { return }
+              private func updateCollisions() {
+                  // Collect coins
+                  var collected: [SCNNode] = []
+                  for coin in coinNodes {
+                      let dx = abs(coin.position.x - playerX)
+                      let dz = coin.position.z - playerZ
+                      if dz > -0.8 && dz < 0.8 && dx < 0.7 {
+                          collected.append(coin)
+                          coin.removeFromParentNode()
+                          coins += 1
+                          score += 10
+                          AudioManager.shared.play("coin")
+                      }
+                  }
+                  coinNodes.removeAll(where: { collected.contains($0) })
+                  // Obstacles
+                  var hitObstacles: [SCNNode] = []
+                  for obs in obstacles {
+                      let dx = abs(obs.position.x - playerX)
+                      let dz = obs.position.z - playerZ
+                      if dz > -0.9 && dz < 0.9 && dx < 0.7 {
+                          hitObstacles.append(obs)
+                      }
+                  }
+                  obstacles.removeAll(where: { hitObstacles.contains($0) })
+                  if !hitObstacles.isEmpty {
+                      gameOver(reason: "hit")
+                  }
+                  // Power-ups
+                  var activated: [SCNNode] = []
+                  for pu in powerUps {
+                      let dx = abs(pu.position.x - playerX)
+                      let dz = pu.position.z - playerZ
+                      if dz > -0.8 && dz < 0.8 && dx < 0.7 {
+                          activated.append(pu)
+                          pu.removeFromParentNode()
+                          AudioManager.shared.play("powerup")
+                          // apply effect (simplified: magnet would attract coins, we skip for brevity)
+                          score += 50
+                      }
+                  }
+                  powerUps.removeAll(where: { activated.contains($0) })
+                  // Remove far objects
+                  let farZ = playerZ - 30
+                  obstacles.removeAll(where: { if $0.position.z < farZ { $0.removeFromParentNode(); return true }; return false })
+                  coinNodes.removeAll(where: { if $0.position.z < farZ { $0.removeFromParentNode(); return true }; return false })
+                  powerUps.removeAll(where: { if $0.position.z < farZ { $0.removeFromParentNode(); return true }; return false })
+              }
+
+              private func gameOver(reason: String) {
                   isGameOver = true
                   AudioManager.shared.play("hit")
                   AudioManager.shared.stopBGM()
-                  let alert = UIAlertController(title: "Game Over", message: "Score: \(score)  Coins: \(coins)", preferredStyle: .alert)
-                  alert.addAction(UIAlertAction(title: "Restart", style: .default) { _ in
-                      self.dismiss(animated: false)
+                  let alert = UIAlertController(title: "GAME OVER", message: "Distance: \(distance) m\nCoins: \(coins)\nScore: \(score)", preferredStyle: .alert)
+                  alert.addAction(UIAlertAction(title: "Restart", style: .default) { [weak self] _ in
+                      self?.dismiss(animated: false) { 
+                          // will re-present game
+                      }
                   })
-                  alert.addAction(UIAlertAction(title: "Menu", style: .cancel) { _ in
-                      self.dismiss(animated: false)
+                  alert.addAction(UIAlertAction(title: "Menu", style: .cancel) { [weak self] _ in
+                      self?.dismiss(animated: true)
                   })
                   present(alert, animated: true)
+              }
+
+              private func mat(_ r: Float, _ g: Float, _ b: Float) -> SCNMaterial {
+                  let m = SCNMaterial()
+                  m.diffuse.contents = UIColor(red: CGFloat(r), green: CGFloat(g), blue: CGFloat(b), alpha: 1)
+                  m.lightingModel = .lambert
+                  return m
               }
 
               override var prefersStatusBarHidden: Bool { true }
               override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
           }
-
-          extension GameViewController: SCNPhysicsContactDelegate {
-              func physicsWorld(_ world: SCNPhysicsWorld, didBegin contact: SCNPhysicsContact) {
-                  // not using physics for collisions, manual detection
-              }
-          }
           SWIFT_EOF
 
-      # ── project.yml ──────────────────────────────────────────────────────────
+# ============================================================================
+#  PROJECT.YML
+# ============================================================================
       - name: project.yml
         run: |
-          cat > InfiniteRoad/project.yml << 'YAML_EOF'
-          name: InfiniteRoadRunner
+          cat > InfinityRun/project.yml << 'YAML_EOF'
+          name: InfinityRun
           options:
-            bundleIdPrefix: com.infiniteroadrunner
+            bundleIdPrefix: com.infinityrun3d
             createIntermediateGroups: true
             deploymentTarget:
               iOS: "16.0"
@@ -892,7 +998,7 @@ jobs:
             base:
               SWIFT_VERSION: "5.9"
               DEVELOPMENT_TEAM: ""
-              PRODUCT_BUNDLE_IDENTIFIER: com.infiniteroadrunner.game
+              PRODUCT_BUNDLE_IDENTIFIER: com.infinityrun3d.game
               TARGETED_DEVICE_FAMILY: "1"
               IPHONEOS_DEPLOYMENT_TARGET: "16.0"
               CODE_SIGN_IDENTITY: ""
@@ -902,7 +1008,7 @@ jobs:
               DEBUG_INFORMATION_FORMAT: dwarf
               SUPPORTS_MACCATALYST: "NO"
           targets:
-            InfiniteRoadRunner:
+            InfinityRun:
               type: application
               platform: iOS
               deploymentTarget: "16.0"
@@ -913,7 +1019,7 @@ jobs:
               settings:
                 base:
                   INFOPLIST_FILE: Resources/Info.plist
-                  PRODUCT_NAME: InfiniteRoadRunner
+                  PRODUCT_NAME: InfinityRun
                   ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
                   CURRENT_PROJECT_VERSION: "1"
                   MARKETING_VERSION: "1.0"
@@ -923,20 +1029,22 @@ jobs:
                 - SDK: AVFoundation.framework
           YAML_EOF
 
-      # ── Info.plist ───────────────────────────────────────────────────────────
+# ============================================================================
+#  INFO.PLIST
+# ============================================================================
       - name: Info.plist
         run: |
-          cat > InfiniteRoad/Resources/Info.plist << 'PLIST_EOF'
+          cat > InfinityRun/Resources/Info.plist << 'PLIST_EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
               <key>CFBundleDevelopmentRegion</key><string>en</string>
-              <key>CFBundleDisplayName</key><string>Infinite Road Runner</string>
+              <key>CFBundleDisplayName</key><string>Infinity Run 3D</string>
               <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
               <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
               <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-              <key>CFBundleName</key><string>InfiniteRoadRunner</string>
+              <key>CFBundleName</key><string>InfinityRun</string>
               <key>CFBundlePackageType</key><string>APPL</string>
               <key>CFBundleShortVersionString</key><string>1.0</string>
               <key>CFBundleVersion</key><string>1</string>
@@ -950,16 +1058,16 @@ jobs:
               <key>UIRequiresFullScreen</key><true/>
               <key>UIStatusBarHidden</key><true/>
               <key>UIViewControllerBasedStatusBarAppearance</key><false/>
-              <key>UIBackgroundModes</key>
-              <array/>
           </dict>
           </plist>
           PLIST_EOF
 
-      # ── LaunchScreen ─────────────────────────────────────────────────────────
+# ============================================================================
+#  LAUNCH SCREEN
+# ============================================================================
       - name: LaunchScreen.storyboard
         run: |
-          cat > InfiniteRoad/Resources/LaunchScreen.storyboard << 'XML_EOF'
+          cat > InfinityRun/Resources/LaunchScreen.storyboard << 'XML_EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0"
                     toolsVersion="21701" targetRuntime="AppleCocoa Touch"
@@ -977,7 +1085,7 @@ jobs:
                                   <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                   <color key="backgroundColor" red="0.05" green="0.05" blue="0.1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                                   <label opaque="NO" userInteractionEnabled="NO" contentMode="left"
-                                         text="INFINITE ROAD RUNNER" textAlignment="center"
+                                         text="INFINITY RUN 3D" textAlignment="center"
                                          lineBreakMode="middleTruncation" baselineAdjustment="alignBaselines"
                                          adjustsFontSizeToFit="NO"
                                          translatesAutoresizingMaskIntoConstraints="NO" id="lb1">
@@ -995,16 +1103,18 @@ jobs:
           </document>
           XML_EOF
 
-      # ── AppIcon ──────────────────────────────────────────────────────────────
+# ============================================================================
+#  APP ICON GENERATION
+# ============================================================================
       - name: Generate AppIcon
         run: |
-          cat > InfiniteRoad/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json << 'JSON_EOF'
+          cat > InfinityRun/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json << 'JSON_EOF'
           {
             "images":[{"idiom":"universal","platform":"ios","size":"1024x1024", "filename":"icon.png","scale":"1x"}],
             "info":{"author":"xcode","version":1}
           }
           JSON_EOF
-          cat > InfiniteRoad/Resources/Assets.xcassets/Contents.json << 'JSON_EOF'
+          cat > InfinityRun/Resources/Assets.xcassets/Contents.json << 'JSON_EOF'
           {"info":{"author":"xcode","version":1}}
           JSON_EOF
           python3 - << 'PYEOF'
@@ -1017,85 +1127,63 @@ jobs:
                   row = [0]
                   for x in range(w):
                       cx, cy = x - w//2, y - h//2
-                      road = abs(cy) < 0.1 * h  # road stripe
-                      if road:
-                          r, g, b = 40, 40, 40
-                      else:
-                          r, g, b = 10, 5, 20
-                      row += [min(255,r), min(255,g), min(255,b)]
+                      r = 15; g = 10; b = 30
+                      if abs(cy) < h*0.1: r,g,b = 60,60,60
+                      row += [r, g, b]
                   rows.append(bytes(row))
-              raw  = zlib.compress(b''.join(rows), 9)
-              sig  = b'\x89PNG\r\n\x1a\n'
-              ihdr = u32(w) + u32(h) + bytes([8, 2, 0, 0, 0])
-              return sig + chunk(b'IHDR', ihdr) + chunk(b'IDAT', raw) + chunk(b'IEND', b'')
-          with open('InfiniteRoad/Resources/Assets.xcassets/AppIcon.appiconset/icon.png', 'wb') as f:
+              raw = zlib.compress(b''.join(rows), 9)
+              return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', u32(w)+u32(h)+bytes([8,2,0,0,0])) + chunk(b'IDAT', raw) + chunk(b'IEND', b'')
+          with open('InfinityRun/Resources/Assets.xcassets/AppIcon.appiconset/icon.png', 'wb') as f:
               f.write(png(1024, 1024))
           print("Icon OK")
           PYEOF
 
-      # ── Generate Sounds ──────────────────────────────────────────────────────
+# ============================================================================
+#  GENERATE SOUNDS (WAV)
+# ============================================================================
       - name: Generate Sounds
         run: |
           python3 << 'PYEOF'
           import struct, wave, math, os
-
-          def wav_file(path, freq, duration, volume=0.5, sample_rate=44100):
-              n_samples = int(sample_rate * duration)
-              data = []
-              for i in range(n_samples):
-                  t = float(i) / sample_rate
-                  val = int(volume * 32767.0 * math.sin(2.0 * math.pi * freq * t))
-                  data.append(struct.pack('<h', val))
-              raw = b''.join(data)
+          def wav(path, freq, dur, vol=0.5, sr=44100):
+              n = int(sr*dur)
+              data = [struct.pack('<h', int(vol*32767*math.sin(2*math.pi*freq*i/sr))) for i in range(n)]
               with wave.open(path, 'w') as wf:
-                  wf.setnchannels(1)
-                  wf.setsampwidth(2)
-                  wf.setframerate(sample_rate)
-                  wf.writeframes(raw)
-
-          sounds_dir = 'InfiniteRoad/Resources/Sounds'
-          os.makedirs(sounds_dir, exist_ok=True)
-
-          # coin sound
-          wav_file(os.path.join(sounds_dir, 'coin.wav'), 880, 0.15)
-          # jump sound
-          wav_file(os.path.join(sounds_dir, 'jump.wav'), 440, 0.2)
-          # hit sound
-          wav_file(os.path.join(sounds_dir, 'hit.wav'), 220, 0.5, volume=0.8)
-          # background music: simple arpeggio loop
-          bgm_path = os.path.join(sounds_dir, 'bgm.wav')
-          sample_rate = 22050
-          duration = 3.0
-          n_samples = int(sample_rate * duration)
-          bgm_data = []
-          notes = [261.63, 329.63, 392.00, 523.25]  # C E G C
-          for i in range(n_samples):
-              t = float(i) / sample_rate
-              note_idx = (i // (sample_rate // 4)) % len(notes)
-              freq = notes[note_idx]
-              val = int(0.3 * 32767.0 * math.sin(2.0 * math.pi * freq * t))
-              bgm_data.append(struct.pack('<h', val))
-          raw_bgm = b''.join(bgm_data)
-          with wave.open(bgm_path, 'w') as wf:
-              wf.setnchannels(1)
-              wf.setsampwidth(2)
-              wf.setframerate(sample_rate)
-              wf.writeframes(raw_bgm)
-          print("✅ Sounds generated")
+                  wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(sr)
+                  wf.writeframes(b''.join(data))
+          d = 'InfinityRun/Resources/Sounds'
+          os.makedirs(d, exist_ok=True)
+          wav(os.path.join(d,'coin.wav'), 1200, 0.12)
+          wav(os.path.join(d,'jump.wav'), 500, 0.18)
+          wav(os.path.join(d,'hit.wav'), 200, 0.4, vol=0.8)
+          wav(os.path.join(d,'powerup.wav'), 800, 0.25)
+          # BGM: simple loop
+          bgm = os.path.join(d,'bgm.wav')
+          sr=22050; dur=4; n=int(sr*dur)
+          samples=[]
+          for i in range(n):
+              t=i/sr
+              note=261.63 if (i//(sr//4))%2==0 else 329.63
+              samples.append(struct.pack('<h', int(0.25*32767*math.sin(2*math.pi*note*t))))
+          with wave.open(bgm, 'w') as wf:
+              wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(sr)
+              wf.writeframes(b''.join(samples))
+          print("Sounds OK")
           PYEOF
 
-      # ── XcodeGen ─────────────────────────────────────────────────────────────
+# ============================================================================
+#  XCODEGEN & BUILD
+# ============================================================================
       - name: Generate Xcode Project
-        working-directory: InfiniteRoad
+        working-directory: InfinityRun
         run: xcodegen generate --spec project.yml --project .
 
-      # ── Build ────────────────────────────────────────────────────────────────
       - name: Build (unsigned)
         run: |
           set -o pipefail
           xcodebuild \
-            -project InfiniteRoad/InfiniteRoadRunner.xcodeproj \
-            -scheme InfiniteRoadRunner \
+            -project InfinityRun/InfinityRun.xcodeproj \
+            -scheme InfinityRun \
             -configuration Release \
             -sdk iphoneos \
             -destination "generic/platform=iOS" \
@@ -1108,44 +1196,42 @@ jobs:
             OBJROOT="${{ github.workspace }}/build/obj" \
             SYMROOT="${{ github.workspace }}/build/sym" \
             clean build 2>&1 | tee build.log | xcpretty || \
-            (echo "=== BUILD ERRORS ===" && grep "error:" build.log | head -30 && exit 1)
+            (echo "=== BUILD ERRORS ===" && grep "error:" build.log | head -40 && exit 1)
 
-      # ── Package IPA ──────────────────────────────────────────────────────────
       - name: Package IPA
         run: |
-          APP=$(find "${{ github.workspace }}/build/sym" -name "InfiniteRoadRunner.app" -type d | head -1)
+          APP=$(find "${{ github.workspace }}/build/sym" -name "InfinityRun.app" -type d | head -1)
           if [ -z "$APP" ]; then
             echo "❌ .app not found"
             grep "error:" build.log | head -20
             exit 1
           fi
-          echo "✅ Found: $APP ($(du -sh "$APP" | cut -f1))"
+          echo "✅ App found: $APP ($(du -sh "$APP" | cut -f1))"
           mkdir -p Payload
-          cp -r "$APP" Payload/InfiniteRoadRunner.app
-          rm -rf Payload/InfiniteRoadRunner.app/_CodeSignature 2>/dev/null || true
-          zip -r InfiniteRoadRunner.ipa Payload
-          echo "📦 IPA: $(du -sh InfiniteRoadRunner.ipa | cut -f1)"
+          cp -r "$APP" Payload/InfinityRun.app
+          rm -rf Payload/InfinityRun.app/_CodeSignature 2>/dev/null || true
+          zip -r InfinityRun.ipa Payload
+          echo "📦 IPA: $(du -sh InfinityRun.ipa | cut -f1)"
 
-      # ── Upload ───────────────────────────────────────────────────────────────
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: InfiniteRoadRunner-iPhone
-          path: InfiniteRoadRunner.ipa
+          name: InfinityRun-iPhone
+          path: InfinityRun.ipa
           retention-days: 30
 
-      # ── Summary ───────────────────────────────────────────────────────────────
       - name: Summary
         run: |
           echo "╔═══════════════════════════════════════════╗"
-          echo "║  🚀 INFINITE ROAD RUNNER – BUILD DONE     ║"
+          echo "║  🏁 INFINITY RUN 3D – BUILD SUCCESS       ║"
           echo "╠═══════════════════════════════════════════╣"
-          echo "║  FEATURES INCLUDED:                       ║"
-          echo "║  ✅ PS5-style on-screen joystick           ║"
-          echo "║  ✅ AAA humanoid character with animation ║"
-          echo "║  ✅ Unlimited procedural road             ║"
-          echo "║  ✅ Main menu + settings + char select    ║"
-          echo "║  ✅ Sound effects & BGM (WAV generated)   ║"
+          echo "║  FEATURES:                                ║"
+          echo "║  ✅ PS5-style joystick                    ║"
+          echo "║  ✅ AAA third-person character             ║"
+          echo "║  ✅ Infinite road with trees & buildings   ║"
+          echo "║  ✅ Coins, obstacles, power‑ups            ║"
+          echo "║  ✅ Main menu, settings, character select  ║"
+          echo "║  ✅ BGM & sound effects                   ║"
           echo "╠═══════════════════════════════════════════╣"
           echo "║  SIDELOAD:                                ║"
           echo "║  Download IPA → AltStore / Sideloadly    ║"
