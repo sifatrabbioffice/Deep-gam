@@ -1,901 +1,1152 @@
-name: Build and Deploy AAA Game
+name: 🚀 Infinite Road Runner – AAA iOS Game
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  build:
+    name: Build IPA
     runs-on: macos-14
-    
     steps:
-      - name: Checkout repository
+
+      - name: Checkout
         uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install Tools
+        run: |
+          brew install xcodegen
+          gem install xcpretty --no-document 2>/dev/null || true
+
+      - name: Create Directories
+        run: |
+          mkdir -p InfiniteRoad/Sources
+          mkdir -p InfiniteRoad/Resources/Assets.xcassets/AppIcon.appiconset
+          mkdir -p InfiniteRoad/Resources/Sounds
+
+      # ── AppDelegate ──────────────────────────────────────────────────────────
+      - name: AppDelegate.swift
+        run: |
+          cat > InfiniteRoad/Sources/AppDelegate.swift << 'SWIFT_EOF'
+          import UIKit
+
+          @main
+          class AppDelegate: UIResponder, UIApplicationDelegate {
+              var window: UIWindow?
+              func application(
+                  _ application: UIApplication,
+                  didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+              ) -> Bool {
+                  window = UIWindow(frame: UIScreen.main.bounds)
+                  window?.rootViewController = MainMenuViewController()
+                  window?.makeKeyAndVisible()
+                  return true
+              }
+          }
+          SWIFT_EOF
+
+      # ── Types ────────────────────────────────────────────────────────────────
+      - name: Types.swift
+        run: |
+          cat > InfiniteRoad/Sources/Types.swift << 'SWIFT_EOF'
+          import Foundation
+
+          enum ObstacleType: CaseIterable {
+              case lowBarrier, tallBarrier, rock
+              var height: Float {
+                  switch self {
+                  case .lowBarrier: return 1.0
+                  case .tallBarrier: return 2.5
+                  case .rock: return 1.5
+                  }
+              }
+              var width: Float { return 1.2 }
+              var scorePenalty: Int { return 200 }
+          }
+
+          enum CharacterSkin: String, CaseIterable {
+              case defaultMan = "Default"
+              case ninja      = "Ninja"
+              case robot      = "Robot"
+
+              var torsoColor: UIColor {
+                  switch self {
+                  case .defaultMan: return UIColor(red: 0.15, green: 0.25, blue: 0.45, alpha: 1)
+                  case .ninja:      return UIColor(red: 0.05, green: 0.05, blue: 0.05, alpha: 1)
+                  case .robot:      return UIColor(red: 0.55, green: 0.55, blue: 0.60, alpha: 1)
+                  }
+              }
+              var headColor: UIColor {
+                  switch self {
+                  case .defaultMan: return UIColor(red: 0.92, green: 0.76, blue: 0.65, alpha: 1)
+                  case .ninja:      return UIColor(red: 0.80, green: 0.70, blue: 0.60, alpha: 1)
+                  case .robot:      return UIColor(red: 0.70, green: 0.70, blue: 0.75, alpha: 1)
+                  }
+              }
+              var pantsColor: UIColor {
+                  switch self {
+                  case .defaultMan: return UIColor(red: 0.10, green: 0.12, blue: 0.18, alpha: 1)
+                  case .ninja:      return UIColor(red: 0.08, green: 0.08, blue: 0.10, alpha: 1)
+                  case .robot:      return UIColor(red: 0.30, green: 0.30, blue: 0.35, alpha: 1)
+                  }
+              }
+          }
+
+          extension UserDefaults {
+              private enum Keys {
+                  static let selectedSkin = "selected_skin"
+                  static let soundVolume = "sound_volume"
+              }
+              var selectedSkin: CharacterSkin {
+                  get {
+                      guard let raw = string(forKey: Keys.selectedSkin),
+                            let skin = CharacterSkin(rawValue: raw) else { return .defaultMan }
+                      return skin
+                  }
+                  set { set(newValue.rawValue, forKey: Keys.selectedSkin) }
+              }
+              var soundVolume: Float {
+                  get { return float(forKey: Keys.soundVolume) != 0 ? float(forKey: Keys.soundVolume) : 0.7 }
+                  set { set(newValue, forKey: Keys.soundVolume) }
+              }
+          }
+          SWIFT_EOF
+
+      # ── AudioManager ─────────────────────────────────────────────────────────
+      - name: AudioManager.swift
+        run: |
+          cat > InfiniteRoad/Sources/AudioManager.swift << 'SWIFT_EOF'
+          import AVFoundation
+
+          class AudioManager {
+              static let shared = AudioManager()
+              private var players: [String: AVAudioPlayer] = [:]
+              private var bgmPlayer: AVAudioPlayer?
+
+              func preloadSounds() {
+                  let sounds = ["coin", "jump", "hit", "bgm"]
+                  for name in sounds {
+                      guard let url = Bundle.main.url(forResource: name, withExtension: "wav") else { continue }
+                      do {
+                          let player = try AVAudioPlayer(contentsOf: url)
+                          player.prepareToPlay()
+                          if name == "bgm" {
+                              player.numberOfLoops = -1
+                              player.volume = UserDefaults.standard.soundVolume
+                              bgmPlayer = player
+                          } else {
+                              players[name] = player
+                          }
+                      } catch {
+                          print("Audio load error: \(error)")
+                      }
+                  }
+                  bgmPlayer?.play()
+              }
+
+              func play(_ sound: String) {
+                  guard let player = players[sound] else { return }
+                  player.volume = UserDefaults.standard.soundVolume
+                  player.currentTime = 0
+                  player.play()
+              }
+
+              func updateVolume(_ vol: Float) {
+                  bgmPlayer?.volume = vol
+                  for (_, player) in players { player.volume = vol }
+              }
+
+              func stopBGM() { bgmPlayer?.stop() }
+          }
+          SWIFT_EOF
+
+      # ── JoystickView (adapted for runner) ────────────────────────────────────
+      - name: JoystickView.swift
+        run: |
+          cat > InfiniteRoad/Sources/JoystickView.swift << 'SWIFT_EOF'
+          import UIKit
+
+          class JoystickView: UIView {
+              private let ring = UIView()
+              private let knob = UIView()
+              let radius: CGFloat
+              var velocity: SIMD2<Float> = .zero   // x: horizontal, y: vertical
+              var isActive: Bool = false
+              var jumpTriggered: Bool = false
+              weak var trackingTouch: UITouch?
+
+              init(radius: CGFloat) {
+                  self.radius = radius
+                  super.init(frame: CGRect(x: 0, y: 0, width: radius * 2, height: radius * 2))
+                  isUserInteractionEnabled = false
+                  alpha = 0.78
+
+                  ring.frame               = bounds
+                  ring.layer.cornerRadius  = radius
+                  ring.backgroundColor     = UIColor(white: 1, alpha: 0.07)
+                  ring.layer.borderColor   = UIColor(white: 1, alpha: 0.26).cgColor
+                  ring.layer.borderWidth   = 2
+                  addSubview(ring)
+
+                  let kR                   = radius * 0.38
+                  knob.frame               = CGRect(x: radius - kR, y: radius - kR, width: kR * 2, height: kR * 2)
+                  knob.layer.cornerRadius  = kR
+                  knob.backgroundColor     = UIColor(white: 1, alpha: 0.32)
+                  knob.layer.borderColor   = UIColor(white: 1, alpha: 0.5).cgColor
+                  knob.layer.borderWidth   = 1.5
+                  addSubview(knob)
+              }
+              required init?(coder: NSCoder) { fatalError() }
+
+              func moveTouch(_ touch: UITouch, in parentView: UIView) {
+                  let pt   = touch.location(in: parentView)
+                  let cx   = frame.midX, cy = frame.midY
+                  let dx   = Float(pt.x - cx), dy = Float(pt.y - cy)
+                  let dist = sqrt(dx * dx + dy * dy)
+                  let maxD = Float(radius)
+                  let f    = dist <= maxD ? 1.0 : maxD / dist
+                  knob.center = CGPoint(x: cx + CGFloat(dx * f), y: cy + CGFloat(dy * f))
+                  velocity    = SIMD2<Float>(dx * f / maxD, dy * f / maxD)
+                  isActive    = dist > maxD * 0.12
+                  jumpTriggered = (dy < -0.6 * maxD)  // push up beyond threshold triggers jump
+              }
+
+              func reset() {
+                  knob.center   = CGPoint(x: radius, y: radius)
+                  velocity      = .zero
+                  isActive      = false
+                  jumpTriggered = false
+                  trackingTouch = nil
+              }
+          }
+          SWIFT_EOF
+
+      # ── CharacterNode ────────────────────────────────────────────────────────
+      - name: CharacterNode.swift
+        run: |
+          cat > InfiniteRoad/Sources/CharacterNode.swift << 'SWIFT_EOF'
+          import SceneKit
+
+          class CharacterNode: SCNNode {
+              private var bodyNode: SCNNode!
+              private var leftLeg: SCNNode!
+              private var rightLeg: SCNNode!
+              private var leftArm: SCNNode!
+              private var rightArm: SCNNode!
+              private var animationTime: Float = 0
+              private var isJumping: Bool = false
+              private var jumpProgress: Float = 0
+              private var skin: CharacterSkin = .defaultMan
+
+              init(skin: CharacterSkin) {
+                  self.skin = skin
+                  super.init()
+                  buildCharacter()
+              }
+              required init?(coder: NSCoder) { fatalError() }
+
+              private func buildCharacter() {
+                  bodyNode = SCNNode()
+                  addChildNode(bodyNode)
+
+                  let torsoGeo = SCNBox(width: 0.55, height: 0.75, length: 0.35, chamferRadius: 0.08)
+                  torsoGeo.materials = [material(color: skin.torsoColor)]
+                  let torso = SCNNode(geometry: torsoGeo)
+                  torso.position = SCNVector3(0, 0.3, 0)
+                  bodyNode.addChildNode(torso)
+
+                  let headGeo = SCNSphere(radius: 0.18)
+                  headGeo.materials = [material(color: skin.headColor)]
+                  let head = SCNNode(geometry: headGeo)
+                  head.position = SCNVector3(0, 0.78, 0)
+                  bodyNode.addChildNode(head)
+
+                  let legGeo = SCNCylinder(radius: 0.10, height: 0.65)
+                  legGeo.materials = [material(color: skin.pantsColor)]
+                  leftLeg = SCNNode(geometry: legGeo)
+                  leftLeg.pivot = SCNMatrix4MakeTranslation(0, 0.325, 0)
+                  leftLeg.position = SCNVector3(-0.16, 0, 0)
+                  bodyNode.addChildNode(leftLeg)
+
+                  rightLeg = SCNNode(geometry: legGeo)
+                  rightLeg.pivot = SCNMatrix4MakeTranslation(0, 0.325, 0)
+                  rightLeg.position = SCNVector3(0.16, 0, 0)
+                  bodyNode.addChildNode(rightLeg)
+
+                  let armGeo = SCNCylinder(radius: 0.08, height: 0.60)
+                  armGeo.materials = [material(color: skin.torsoColor)]
+                  leftArm = SCNNode(geometry: armGeo)
+                  leftArm.pivot = SCNMatrix4MakeTranslation(0, 0.30, 0)
+                  leftArm.position = SCNVector3(-0.36, 0.45, 0)
+                  bodyNode.addChildNode(leftArm)
+
+                  rightArm = SCNNode(geometry: armGeo)
+                  rightArm.pivot = SCNMatrix4MakeTranslation(0, 0.30, 0)
+                  rightArm.position = SCNVector3(0.36, 0.45, 0)
+                  bodyNode.addChildNode(rightArm)
+
+                  position = SCNVector3(0, 0, 0)
+              }
+
+              private func material(color: UIColor) -> SCNMaterial {
+                  let m = SCNMaterial()
+                  m.diffuse.contents = color
+                  m.lightingModel = .lambert
+                  return m
+              }
+
+              func updateAnimation(dt: Float, speed: Float, isGrounded: Bool) {
+                  if !isGrounded {
+                      // jump pose
+                      leftLeg.eulerAngles.x = 0
+                      rightLeg.eulerAngles.x = 0
+                      leftArm.eulerAngles.x = -1.2
+                      rightArm.eulerAngles.x = 1.2
+                      animationTime = 0
+                      return
+                  }
+                  if speed > 0.1 {
+                      animationTime += dt * speed * 8.0
+                      let angle = sin(animationTime) * 0.45
+                      leftLeg.eulerAngles.x = angle
+                      rightLeg.eulerAngles.x = -angle
+                      leftArm.eulerAngles.x = -angle * 0.6
+                      rightArm.eulerAngles.x = angle * 0.6
+                  } else {
+                      leftLeg.eulerAngles.x = 0
+                      rightLeg.eulerAngles.x = 0
+                      leftArm.eulerAngles.x = 0
+                      rightArm.eulerAngles.x = 0
+                      animationTime = 0
+                  }
+              }
+
+              func updateJumpAnimation(progress: Float) {
+                  // progress 0..1, peak at 0.5
+                  let lift: Float = sin(progress * .pi) * 1.5
+                  position.y = lift
+                  if progress < 0.5 {
+                      leftArm.eulerAngles.x = -1.5
+                      rightArm.eulerAngles.x = 1.5
+                  } else {
+                      leftArm.eulerAngles.x = -0.3
+                      rightArm.eulerAngles.x = 0.3
+                  }
+              }
+          }
+          SWIFT_EOF
+
+      # ── RoadManager ──────────────────────────────────────────────────────────
+      - name: RoadManager.swift
+        run: |
+          cat > InfiniteRoad/Sources/RoadManager.swift << 'SWIFT_EOF'
+          import SceneKit
+
+          class RoadManager {
+              private weak var scene: SCNScene?
+              private let segmentLength: Float = 20
+              private let lanes: Int = 3
+              private let laneWidth: Float = 3.0
+              private var activeSegments: [SCNNode] = []
+              private var nextZ: Float = 0
+              private var furthestZ: Float = 0
+
+              init(scene: SCNScene) {
+                  self.scene = scene
+                  buildInitialSegments()
+              }
+
+              private func buildInitialSegments() {
+                  for i in -2...5 { addSegment(at: Float(i) * segmentLength) }
+              }
+
+              private func addSegment(at z: Float) {
+                  guard let scene = scene else { return }
+                  let roadGeo = SCNBox(width: CGFloat(laneWidth * Float(lanes)), height: 0.1, length: CGFloat(segmentLength), chamferRadius: 0)
+                  let mat = SCNMaterial()
+                  mat.diffuse.contents = UIColor(red: 0.15, green: 0.15, blue: 0.15, alpha: 1)
+                  mat.lightingModel = .lambert
+                  roadGeo.materials = [mat]
+                  let road = SCNNode(geometry: roadGeo)
+                  road.position = SCNVector3(0, 0, z + segmentLength/2)
+                  scene.rootNode.addChildNode(road)
+                  activeSegments.append(road)
+
+                  // lane markers
+                  for lane in -1...1 {
+                      if lane == 0 { continue }
+                      let lineGeo = SCNBox(width: 0.1, height: 0.05, length: CGFloat(segmentLength), chamferRadius: 0)
+                      let lineMat = SCNMaterial()
+                      lineMat.diffuse.contents = UIColor.white
+                      lineGeo.materials = [lineMat]
+                      let line = SCNNode(geometry: lineGeo)
+                      line.position = SCNVector3(Float(lane) * laneWidth, 0.08, z + segmentLength/2)
+                      scene.rootNode.addChildNode(line)
+                      activeSegments.append(line)  // track for removal
+                  }
+
+                  furthestZ = z + segmentLength
+              }
+
+              func update(playerZ: Float) {
+                  // recycle segments: if the player has moved past a segment, remove it and add new ahead
+                  let threshold = playerZ - segmentLength * 2
+                  while let first = activeSegments.first, first.position.z < threshold {
+                      first.removeFromParentNode()
+                      activeSegments.removeFirst()
+                  }
+                  while furthestZ - playerZ < segmentLength * 5 {
+                      addSegment(at: furthestZ)
+                  }
+              }
+          }
+          SWIFT_EOF
+
+      # ── HUD ──────────────────────────────────────────────────────────────────
+      - name: HUD.swift
+        run: |
+          cat > InfiniteRoad/Sources/HUD.swift << 'SWIFT_EOF'
+          import UIKit
+
+          class GameHUD: UIView {
+              private let scoreLabel = UILabel()
+              private let coinLabel  = UILabel()
+
+              override init(frame: CGRect) {
+                  super.init(frame: frame)
+                  isUserInteractionEnabled = false
+                  backgroundColor = .clear
+
+                  coinLabel.frame = CGRect(x: 20, y: 20, width: 200, height: 30)
+                  coinLabel.textColor = UIColor(red: 1, green: 0.85, blue: 0.2, alpha: 1)
+                  coinLabel.font = UIFont(name: "Courier-Bold", size: 22) ?? UIFont.boldSystemFont(ofSize: 22)
+                  addSubview(coinLabel)
+
+                  scoreLabel.frame = CGRect(x: 0, y: 20, width: bounds.width - 20, height: 30)
+                  scoreLabel.autoresizingMask = [.flexibleWidth]
+                  scoreLabel.textAlignment = .right
+                  scoreLabel.textColor = .white
+                  scoreLabel.font = UIFont(name: "Courier-Bold", size: 22) ?? UIFont.boldSystemFont(ofSize: 22)
+                  addSubview(scoreLabel)
+              }
+              required init?(coder: NSCoder) { fatalError() }
+
+              func update(coins: Int, score: Int) {
+                  coinLabel.text = "🪙 \(coins)"
+                  scoreLabel.text = "SCORE: \(score)"
+              }
+          }
+          SWIFT_EOF
+
+      # ── MainMenuViewController ───────────────────────────────────────────────
+      - name: MainMenuViewController.swift
+        run: |
+          cat > InfiniteRoad/Sources/MainMenuViewController.swift << 'SWIFT_EOF'
+          import UIKit
+          import SceneKit
+
+          class MainMenuViewController: UIViewController {
+              private var scnView: SCNView!
+
+              override func viewDidLoad() {
+                  super.viewDidLoad()
+
+                  // Background 3D scene
+                  scnView = SCNView(frame: view.bounds)
+                  scnView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                  view.addSubview(scnView)
+
+                  let scene = SCNScene()
+                  scene.background.contents = UIColor(red: 0.1, green: 0.1, blue: 0.2, alpha: 1)
+                  scnView.scene = scene
+
+                  let camNode = SCNNode()
+                  camNode.camera = SCNCamera()
+                  camNode.position = SCNVector3(0, 2, 6)
+                  camNode.eulerAngles = SCNVector3(-0.2, 0, 0)
+                  scene.rootNode.addChildNode(camNode)
+
+                  let light = SCNNode()
+                  light.light = SCNLight()
+                  light.light?.type = .omni
+                  light.position = SCNVector3(0, 5, 5)
+                  scene.rootNode.addChildNode(light)
+
+                  let charNode = CharacterNode(skin: UserDefaults.standard.selectedSkin)
+                  charNode.position = SCNVector3(0, 0, 0)
+                  scene.rootNode.addChildNode(charNode)
+                  charNode.runAction(SCNAction.repeatForever(SCNAction.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 8)))
+
+                  // UI Buttons
+                  let startBtn = createButton(title: "▶ START", y: view.bounds.height * 0.55)
+                  startBtn.addTarget(self, action: #selector(startGame), for: .touchUpInside)
+                  view.addSubview(startBtn)
+
+                  let settingsBtn = createButton(title: "⚙ SETTINGS", y: view.bounds.height * 0.68)
+                  settingsBtn.addTarget(self, action: #selector(openSettings), for: .touchUpInside)
+                  view.addSubview(settingsBtn)
+
+                  AudioManager.shared.preloadSounds()
+              }
+
+              private func createButton(title: String, y: CGFloat) -> UIButton {
+                  let w: CGFloat = 220, h: CGFloat = 50
+                  let btn = UIButton(frame: CGRect(x: (view.bounds.width - w)/2, y: y, width: w, height: h))
+                  btn.setTitle(title, for: .normal)
+                  btn.titleLabel?.font = UIFont(name: "Courier-Bold", size: 22) ?? UIFont.boldSystemFont(ofSize: 22)
+                  btn.backgroundColor = UIColor(red: 0.6, green: 0, blue: 0, alpha: 0.85)
+                  btn.layer.cornerRadius = 12
+                  btn.layer.borderColor = UIColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 1).cgColor
+                  btn.layer.borderWidth = 2
+                  return btn
+              }
+
+              @objc private func startGame() {
+                  let gameVC = GameViewController()
+                  gameVC.modalPresentationStyle = .fullScreen
+                  present(gameVC, animated: true)
+              }
+
+              @objc private func openSettings() {
+                  let settingsVC = SettingsViewController()
+                  settingsVC.modalPresentationStyle = .fullScreen
+                  present(settingsVC, animated: true)
+              }
+
+              override var prefersStatusBarHidden: Bool { true }
+          }
+          SWIFT_EOF
+
+      # ── SettingsViewController ───────────────────────────────────────────────
+      - name: SettingsViewController.swift
+        run: |
+          cat > InfiniteRoad/Sources/SettingsViewController.swift << 'SWIFT_EOF'
+          import UIKit
+          import SceneKit
+
+          class SettingsViewController: UIViewController {
+              private var previewView: SCNView!
+              private var charNode: CharacterNode!
+              private let segmentControl = UISegmentedControl(items: CharacterSkin.allCases.map { $0.rawValue })
+              private let volumeSlider = UISlider()
+
+              override func viewDidLoad() {
+                  super.viewDidLoad()
+                  view.backgroundColor = UIColor(red: 0.05, green: 0.05, blue: 0.1, alpha: 1)
+
+                  // 3D Preview
+                  previewView = SCNView(frame: CGRect(x: 0, y: 80, width: view.bounds.width, height: 250))
+                  previewView.backgroundColor = .clear
+                  view.addSubview(previewView)
+
+                  let scene = SCNScene()
+                  scene.background.contents = UIColor.clear
+                  previewView.scene = scene
+                  previewView.autoenablesDefaultLighting = true
+                  previewView.allowsCameraControl = true
+
+                  let cam = SCNNode()
+                  cam.camera = SCNCamera()
+                  cam.position = SCNVector3(0, 1.5, 3)
+                  scene.rootNode.addChildNode(cam)
+
+                  charNode = CharacterNode(skin: UserDefaults.standard.selectedSkin)
+                  charNode.position = SCNVector3(0, 0, 0)
+                  scene.rootNode.addChildNode(charNode)
+
+                  // Character selector
+                  segmentControl.frame = CGRect(x: 30, y: 350, width: view.bounds.width - 60, height: 40)
+                  segmentControl.selectedSegmentIndex = CharacterSkin.allCases.firstIndex(of: UserDefaults.standard.selectedSkin) ?? 0
+                  segmentControl.addTarget(self, action: #selector(skinChanged), for: .valueChanged)
+                  view.addSubview(segmentControl)
+
+                  // Volume
+                  let volLabel = UILabel(frame: CGRect(x: 30, y: 420, width: 200, height: 30))
+                  volLabel.text = "🔊 Volume"
+                  volLabel.textColor = .white
+                  volLabel.font = UIFont.systemFont(ofSize: 18, weight: .bold)
+                  view.addSubview(volLabel)
+
+                  volumeSlider.frame = CGRect(x: 30, y: 450, width: view.bounds.width - 60, height: 30)
+                  volumeSlider.minimumValue = 0
+                  volumeSlider.maximumValue = 1
+                  volumeSlider.value = UserDefaults.standard.soundVolume
+                  volumeSlider.addTarget(self, action: #selector(volumeChanged), for: .valueChanged)
+                  view.addSubview(volumeSlider)
+
+                  // Back button
+                  let backBtn = UIButton(type: .system)
+                  backBtn.frame = CGRect(x: 30, y: 520, width: 120, height: 44)
+                  backBtn.setTitle("← BACK", for: .normal)
+                  backBtn.titleLabel?.font = UIFont.boldSystemFont(ofSize: 18)
+                  backBtn.setTitleColor(.white, for: .normal)
+                  backBtn.backgroundColor = UIColor(red: 0.3, green: 0.3, blue: 0.3, alpha: 0.7)
+                  backBtn.layer.cornerRadius = 8
+                  backBtn.addTarget(self, action: #selector(goBack), for: .touchUpInside)
+                  view.addSubview(backBtn)
+              }
+
+              @objc private func skinChanged() {
+                  let newSkin = CharacterSkin.allCases[segmentControl.selectedSegmentIndex]
+                  UserDefaults.standard.selectedSkin = newSkin
+                  // replace character
+                  charNode.removeFromParentNode()
+                  charNode = CharacterNode(skin: newSkin)
+                  charNode.position = SCNVector3(0, 0, 0)
+                  previewView.scene?.rootNode.addChildNode(charNode)
+              }
+
+              @objc private func volumeChanged() {
+                  let vol = volumeSlider.value
+                  UserDefaults.standard.soundVolume = vol
+                  AudioManager.shared.updateVolume(vol)
+              }
+
+              @objc private func goBack() {
+                  dismiss(animated: true)
+              }
+
+              override var prefersStatusBarHidden: Bool { true }
+          }
+          SWIFT_EOF
+
+      # ── GameViewController (Core Gameplay) ──────────────────────────────────
+      - name: GameViewController.swift
+        run: |
+          cat > InfiniteRoad/Sources/GameViewController.swift << 'SWIFT_EOF'
+          import UIKit
+          import SceneKit
+
+          class GameViewController: UIViewController, SCNSceneRendererDelegate {
+              private var scnView: SCNView!
+              private var scene: SCNScene!
+              private var player: CharacterNode!
+              private var cameraNode: SCNNode!
+              private var roadManager: RoadManager!
+              private var joystick: JoystickView!
+              private var hud: GameHUD!
+
+              // State
+              private var playerX: Float = 0
+              private var playerZ: Float = 0
+              private var speed: Float = 5.0
+              private var coins: Int = 0
+              private var score: Int = 0
+              private var isJumping = false
+              private var jumpTimer: Float = 0
+              private let jumpDuration: Float = 0.8
+              private var isGameOver = false
+              private var lastTime: TimeInterval = 0
+
+              private var obstacles: [SCNNode] = []
+              private var coinNodes: [SCNNode] = []
+              private var spawnTimer: Float = 0
+              private let spawnInterval: Float = 2.0
+
+              override func viewDidLoad() {
+                  super.viewDidLoad()
+                  setupScene()
+                  setupPlayer()
+                  setupCamera()
+                  roadManager = RoadManager(scene: scene)
+                  setupJoystick()
+                  setupHUD()
+                  scene.physicsWorld.contactDelegate = self
+                  scnView.delegate = self
+                  scnView.isPlaying = true
+              }
+
+              private func setupScene() {
+                  scnView = SCNView(frame: view.bounds)
+                  scnView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                  scnView.backgroundColor = UIColor(red: 0.1, green: 0.1, blue: 0.2, alpha: 1)
+                  scnView.antialiasingMode = .multisampling4X
+                  view.addSubview(scnView)
+
+                  scene = SCNScene()
+                  scene.background.contents = UIColor(red: 0.05, green: 0.05, blue: 0.15, alpha: 1)
+                  scnView.scene = scene
+              }
+
+              private func setupPlayer() {
+                  let skin = UserDefaults.standard.selectedSkin
+                  player = CharacterNode(skin: skin)
+                  player.position = SCNVector3(0, 0, 0)
+                  scene.rootNode.addChildNode(player)
+              }
+
+              private func setupCamera() {
+                  cameraNode = SCNNode()
+                  cameraNode.camera = SCNCamera()
+                  cameraNode.camera?.fieldOfView = 75
+                  cameraNode.position = SCNVector3(0, 2.5, 5)
+                  cameraNode.eulerAngles = SCNVector3(-0.15, 0, 0)
+                  scene.rootNode.addChildNode(cameraNode)
+              }
+
+              private func setupJoystick() {
+                  let jR = view.bounds.height * 0.15
+                  joystick = JoystickView(radius: jR)
+                  joystick.center = CGPoint(x: jR + 30, y: view.bounds.height - jR - 30)
+                  view.addSubview(joystick)
+              }
+
+              private func setupHUD() {
+                  hud = GameHUD(frame: view.bounds)
+                  view.addSubview(hud)
+              }
+
+              // Touch handling
+              override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+                  for t in touches {
+                      let pt = t.location(in: view)
+                      if joystick.frame.contains(pt) && joystick.trackingTouch == nil {
+                          joystick.trackingTouch = t
+                      }
+                  }
+              }
+              override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+                  for t in touches {
+                      if t === joystick.trackingTouch {
+                          joystick.moveTouch(t, in: view)
+                      }
+                  }
+              }
+              override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+                  for t in touches {
+                      if t === joystick.trackingTouch { joystick.reset() }
+                  }
+              }
+              override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+                  touchesEnded(touches, with: event)
+              }
+
+              // Game Loop
+              func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
+                  guard !isGameOver else { return }
+                  let dt = lastTime == 0 ? 0 : Float(min(time - lastTime, 0.05))
+                  lastTime = time
+
+                  handleInput(dt: dt)
+                  updatePlayer(dt: dt)
+                  updateObstacles(dt: dt)
+                  spawnObjects(dt: dt)
+                  roadManager.update(playerZ: playerZ)
+                  cameraNode.position = SCNVector3(playerX, 2.5, playerZ + 5)
+
+                  DispatchQueue.main.async {
+                      self.hud.update(coins: self.coins, score: self.score)
+                  }
+              }
+
+              private func handleInput(dt: Float) {
+                  let vel = joystick.velocity
+                  // horizontal movement - continuous lane
+                  let targetX = playerX + vel.x * 8 * dt
+                  let laneLimit: Float = 4.0  // half road width
+                  playerX = max(-laneLimit, min(laneLimit, targetX))
+
+                  // jump
+                  if joystick.jumpTriggered && !isJumping {
+                      isJumping = true
+                      jumpTimer = 0
+                      AudioManager.shared.play("jump")
+                      joystick.jumpTriggered = false
+                  }
+              }
+
+              private func updatePlayer(dt: Float) {
+                  // Forward movement
+                  playerZ += speed * dt
+
+                  // Jump physics
+                  if isJumping {
+                      jumpTimer += dt
+                      let progress = jumpTimer / jumpDuration
+                      if progress >= 1.0 {
+                          isJumping = false
+                          player.updateAnimation(dt: dt, speed: speed, isGrounded: true)
+                          player.position.y = 0
+                      } else {
+                          player.updateJumpAnimation(progress: progress)
+                      }
+                  } else {
+                      player.updateAnimation(dt: dt, speed: speed, isGrounded: true)
+                  }
+
+                  player.position.x = playerX
+                  player.position.z = 0  // relative to camera? We keep player at origin, world moves. We'll shift world.
+                  // Actually easier: move player forward, and update road segments.
+                  // Player position will be at (playerX, 0, playerZ) in world space.
+                  player.position.z = playerZ
+                  score = Int(playerZ)
+              }
+
+              private func updateObstacles(dt: Float) {
+                  for obs in obstacles {
+                      // check collision with player
+                      let distX = abs(obs.position.x - playerX)
+                      let distZ = obs.position.z - playerZ
+                      if distZ > -1 && distZ < 1 && distX < 0.9 {
+                          gameOver()
+                          return
+                      }
+                      // Remove far behind
+                      if obs.position.z < playerZ - 20 {
+                          obs.removeFromParentNode()
+                          obstacles.removeAll { $0 === obs }
+                      }
+                  }
+                  for coin in coinNodes {
+                      let distX = abs(coin.position.x - playerX)
+                      let distZ = coin.position.z - playerZ
+                      if distZ > -0.8 && distZ < 0.8 && distX < 0.8 {
+                          coin.removeFromParentNode()
+                          coinNodes.removeAll { $0 === coin }
+                          coins += 1
+                          AudioManager.shared.play("coin")
+                      }
+                      if coin.position.z < playerZ - 20 {
+                          coin.removeFromParentNode()
+                          coinNodes.removeAll { $0 === coin }
+                      }
+                  }
+              }
+
+              private func spawnObjects(dt: Float) {
+                  spawnTimer += dt
+                  if spawnTimer >= spawnInterval {
+                      spawnTimer = 0
+                      let lane = Float(Int.random(in: -1...1)) * 2.5
+                      let z = playerZ + 40
+                      if Bool.random() {
+                          // spawn obstacle
+                          let type = ObstacleType.allCases.randomElement()!
+                          let obsGeo = SCNBox(width: CGFloat(type.width), height: CGFloat(type.height), length: 0.3, chamferRadius: 0.05)
+                          let mat = SCNMaterial()
+                          mat.diffuse.contents = UIColor.red
+                          obsGeo.materials = [mat]
+                          let obs = SCNNode(geometry: obsGeo)
+                          obs.position = SCNVector3(lane, type.height/2, z)
+                          obs.name = "obstacle"
+                          scene.rootNode.addChildNode(obs)
+                          obstacles.append(obs)
+                      } else {
+                          // spawn coin
+                          let coinGeo = SCNSphere(radius: 0.3)
+                          let coinMat = SCNMaterial()
+                          coinMat.diffuse.contents = UIColor.yellow
+                          coinGeo.materials = [coinMat]
+                          let coinNode = SCNNode(geometry: coinGeo)
+                          coinNode.position = SCNVector3(lane, 0.5, z)
+                          coinNode.name = "coin"
+                          scene.rootNode.addChildNode(coinNode)
+                          coinNodes.append(coinNode)
+                      }
+                  }
+              }
+
+              private func gameOver() {
+                  guard !isGameOver else { return }
+                  isGameOver = true
+                  AudioManager.shared.play("hit")
+                  AudioManager.shared.stopBGM()
+                  let alert = UIAlertController(title: "Game Over", message: "Score: \(score)  Coins: \(coins)", preferredStyle: .alert)
+                  alert.addAction(UIAlertAction(title: "Restart", style: .default) { _ in
+                      self.dismiss(animated: false)
+                  })
+                  alert.addAction(UIAlertAction(title: "Menu", style: .cancel) { _ in
+                      self.dismiss(animated: false)
+                  })
+                  present(alert, animated: true)
+              }
+
+              override var prefersStatusBarHidden: Bool { true }
+              override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .landscape }
+          }
+
+          extension GameViewController: SCNPhysicsContactDelegate {
+              func physicsWorld(_ world: SCNPhysicsWorld, didBegin contact: SCNPhysicsContact) {
+                  // not using physics for collisions, manual detection
+              }
+          }
+          SWIFT_EOF
+
+      # ── project.yml ──────────────────────────────────────────────────────────
+      - name: project.yml
+        run: |
+          cat > InfiniteRoad/project.yml << 'YAML_EOF'
+          name: InfiniteRoadRunner
+          options:
+            bundleIdPrefix: com.infiniteroadrunner
+            createIntermediateGroups: true
+            deploymentTarget:
+              iOS: "16.0"
+          settings:
+            base:
+              SWIFT_VERSION: "5.9"
+              DEVELOPMENT_TEAM: ""
+              PRODUCT_BUNDLE_IDENTIFIER: com.infiniteroadrunner.game
+              TARGETED_DEVICE_FAMILY: "1"
+              IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+              CODE_SIGN_IDENTITY: ""
+              CODE_SIGNING_REQUIRED: "NO"
+              CODE_SIGNING_ALLOWED: "NO"
+              ENABLE_BITCODE: "NO"
+              DEBUG_INFORMATION_FORMAT: dwarf
+              SUPPORTS_MACCATALYST: "NO"
+          targets:
+            InfiniteRoadRunner:
+              type: application
+              platform: iOS
+              deploymentTarget: "16.0"
+              sources:
+                - path: Sources
+              resources:
+                - path: Resources
+              settings:
+                base:
+                  INFOPLIST_FILE: Resources/Info.plist
+                  PRODUCT_NAME: InfiniteRoadRunner
+                  ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+                  CURRENT_PROJECT_VERSION: "1"
+                  MARKETING_VERSION: "1.0"
+              frameworks:
+                - SDK: SceneKit.framework
+                - SDK: UIKit.framework
+                - SDK: AVFoundation.framework
+          YAML_EOF
+
+      # ── Info.plist ───────────────────────────────────────────────────────────
+      - name: Info.plist
+        run: |
+          cat > InfiniteRoad/Resources/Info.plist << 'PLIST_EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleDevelopmentRegion</key><string>en</string>
+              <key>CFBundleDisplayName</key><string>Infinite Road Runner</string>
+              <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+              <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+              <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+              <key>CFBundleName</key><string>InfiniteRoadRunner</string>
+              <key>CFBundlePackageType</key><string>APPL</string>
+              <key>CFBundleShortVersionString</key><string>1.0</string>
+              <key>CFBundleVersion</key><string>1</string>
+              <key>LSRequiresIPhoneOS</key><true/>
+              <key>UILaunchStoryboardName</key><string>LaunchScreen</string>
+              <key>UISupportedInterfaceOrientations</key>
+              <array>
+                  <string>UIInterfaceOrientationLandscapeLeft</string>
+                  <string>UIInterfaceOrientationLandscapeRight</string>
+              </array>
+              <key>UIRequiresFullScreen</key><true/>
+              <key>UIStatusBarHidden</key><true/>
+              <key>UIViewControllerBasedStatusBarAppearance</key><false/>
+              <key>UIBackgroundModes</key>
+              <array/>
+          </dict>
+          </plist>
+          PLIST_EOF
+
+      # ── LaunchScreen ─────────────────────────────────────────────────────────
+      - name: LaunchScreen.storyboard
+        run: |
+          cat > InfiniteRoad/Resources/LaunchScreen.storyboard << 'XML_EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0"
+                    toolsVersion="21701" targetRuntime="AppleCocoa Touch"
+                    propertyAccessControl="none" useAutolayout="YES"
+                    launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES">
+              <dependencies>
+                  <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="21678"/>
+              </dependencies>
+              <scenes>
+                  <scene sceneID="sc1">
+                      <objects>
+                          <viewController id="vc1" sceneMemberID="viewController">
+                              <view key="view" contentMode="scaleToFill" id="vw1">
+                                  <rect key="frame" x="0.0" y="0.0" width="430" height="932"/>
+                                  <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                  <color key="backgroundColor" red="0.05" green="0.05" blue="0.1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                                  <label opaque="NO" userInteractionEnabled="NO" contentMode="left"
+                                         text="INFINITE ROAD RUNNER" textAlignment="center"
+                                         lineBreakMode="middleTruncation" baselineAdjustment="alignBaselines"
+                                         adjustsFontSizeToFit="NO"
+                                         translatesAutoresizingMaskIntoConstraints="NO" id="lb1">
+                                      <rect key="frame" x="0.0" y="396" width="430" height="60"/>
+                                      <fontDescription key="fontDescription" type="boldSystem" pointSize="36"/>
+                                      <color key="textColor" red="1" green="0.8" blue="0.2" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                                      <nil key="highlightedColor"/>
+                                  </label>
+                              </view>
+                          </viewController>
+                          <placeholder placeholderIdentifier="IBFirstResponder" id="fb1" sceneMemberID="firstResponder"/>
+                      </objects>
+                  </scene>
+              </scenes>
+          </document>
+          XML_EOF
+
+      # ── AppIcon ──────────────────────────────────────────────────────────────
+      - name: Generate AppIcon
+        run: |
+          cat > InfiniteRoad/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json << 'JSON_EOF'
+          {
+            "images":[{"idiom":"universal","platform":"ios","size":"1024x1024", "filename":"icon.png","scale":"1x"}],
+            "info":{"author":"xcode","version":1}
+          }
+          JSON_EOF
+          cat > InfiniteRoad/Resources/Assets.xcassets/Contents.json << 'JSON_EOF'
+          {"info":{"author":"xcode","version":1}}
+          JSON_EOF
+          python3 - << 'PYEOF'
+          import struct, zlib, math
+          def png(w, h):
+              def u32(n): return struct.pack('>I', n)
+              def chunk(t, d): return u32(len(d)) + t + d + u32(zlib.crc32(t+d) & 0xffffffff)
+              rows = []
+              for y in range(h):
+                  row = [0]
+                  for x in range(w):
+                      cx, cy = x - w//2, y - h//2
+                      road = abs(cy) < 0.1 * h  # road stripe
+                      if road:
+                          r, g, b = 40, 40, 40
+                      else:
+                          r, g, b = 10, 5, 20
+                      row += [min(255,r), min(255,g), min(255,b)]
+                  rows.append(bytes(row))
+              raw  = zlib.compress(b''.join(rows), 9)
+              sig  = b'\x89PNG\r\n\x1a\n'
+              ihdr = u32(w) + u32(h) + bytes([8, 2, 0, 0, 0])
+              return sig + chunk(b'IHDR', ihdr) + chunk(b'IDAT', raw) + chunk(b'IEND', b'')
+          with open('InfiniteRoad/Resources/Assets.xcassets/AppIcon.appiconset/icon.png', 'wb') as f:
+              f.write(png(1024, 1024))
+          print("Icon OK")
+          PYEOF
+
+      # ── Generate Sounds ──────────────────────────────────────────────────────
+      - name: Generate Sounds
+        run: |
+          python3 << 'PYEOF'
+          import struct, wave, math, os
+
+          def wav_file(path, freq, duration, volume=0.5, sample_rate=44100):
+              n_samples = int(sample_rate * duration)
+              data = []
+              for i in range(n_samples):
+                  t = float(i) / sample_rate
+                  val = int(volume * 32767.0 * math.sin(2.0 * math.pi * freq * t))
+                  data.append(struct.pack('<h', val))
+              raw = b''.join(data)
+              with wave.open(path, 'w') as wf:
+                  wf.setnchannels(1)
+                  wf.setsampwidth(2)
+                  wf.setframerate(sample_rate)
+                  wf.writeframes(raw)
+
+          sounds_dir = 'InfiniteRoad/Resources/Sounds'
+          os.makedirs(sounds_dir, exist_ok=True)
+
+          # coin sound
+          wav_file(os.path.join(sounds_dir, 'coin.wav'), 880, 0.15)
+          # jump sound
+          wav_file(os.path.join(sounds_dir, 'jump.wav'), 440, 0.2)
+          # hit sound
+          wav_file(os.path.join(sounds_dir, 'hit.wav'), 220, 0.5, volume=0.8)
+          # background music: simple arpeggio loop
+          bgm_path = os.path.join(sounds_dir, 'bgm.wav')
+          sample_rate = 22050
+          duration = 3.0
+          n_samples = int(sample_rate * duration)
+          bgm_data = []
+          notes = [261.63, 329.63, 392.00, 523.25]  # C E G C
+          for i in range(n_samples):
+              t = float(i) / sample_rate
+              note_idx = (i // (sample_rate // 4)) % len(notes)
+              freq = notes[note_idx]
+              val = int(0.3 * 32767.0 * math.sin(2.0 * math.pi * freq * t))
+              bgm_data.append(struct.pack('<h', val))
+          raw_bgm = b''.join(bgm_data)
+          with wave.open(bgm_path, 'w') as wf:
+              wf.setnchannels(1)
+              wf.setsampwidth(2)
+              wf.setframerate(sample_rate)
+              wf.writeframes(raw_bgm)
+          print("✅ Sounds generated")
+          PYEOF
+
+      # ── XcodeGen ─────────────────────────────────────────────────────────────
+      - name: Generate Xcode Project
+        working-directory: InfiniteRoad
+        run: xcodegen generate --spec project.yml --project .
+
+      # ── Build ────────────────────────────────────────────────────────────────
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project InfiniteRoad/InfiniteRoadRunner.xcodeproj \
+            -scheme InfiniteRoadRunner \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination "generic/platform=iOS" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            ENABLE_BITCODE=NO \
+            SWIFT_VERSION=5.9 \
+            OBJROOT="${{ github.workspace }}/build/obj" \
+            SYMROOT="${{ github.workspace }}/build/sym" \
+            clean build 2>&1 | tee build.log | xcpretty || \
+            (echo "=== BUILD ERRORS ===" && grep "error:" build.log | head -30 && exit 1)
+
+      # ── Package IPA ──────────────────────────────────────────────────────────
+      - name: Package IPA
+        run: |
+          APP=$(find "${{ github.workspace }}/build/sym" -name "InfiniteRoadRunner.app" -type d | head -1)
+          if [ -z "$APP" ]; then
+            echo "❌ .app not found"
+            grep "error:" build.log | head -20
+            exit 1
+          fi
+          echo "✅ Found: $APP ($(du -sh "$APP" | cut -f1))"
+          mkdir -p Payload
+          cp -r "$APP" Payload/InfiniteRoadRunner.app
+          rm -rf Payload/InfiniteRoadRunner.app/_CodeSignature 2>/dev/null || true
+          zip -r InfiniteRoadRunner.ipa Payload
+          echo "📦 IPA: $(du -sh InfiniteRoadRunner.ipa | cut -f1)"
+
+      # ── Upload ───────────────────────────────────────────────────────────────
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
         with:
-          node-version: '20'
-      
-      - name: Create game directory
-        run: mkdir -p dist
-      
-      - name: Create index.html
+          name: InfiniteRoadRunner-iPhone
+          path: InfiniteRoadRunner.ipa
+          retention-days: 30
+
+      # ── Summary ───────────────────────────────────────────────────────────────
+      - name: Summary
         run: |
-          cat > dist/index.html << 'EOF'
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="theme-color" content="#1a1a2e">
-    <title>ROAD WARRIOR - AAA Mobile Game</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            user-select: none;
-            -webkit-tap-highlight-color: transparent;
-        }
-        
-        body {
-            overflow: hidden;
-            font-family: 'Segoe UI', 'Poppins', system-ui, -apple-system, sans-serif;
-            background: #0a0a1a;
-        }
-        
-        #gameCanvas {
-            display: block;
-            width: 100%;
-            height: 100%;
-            position: fixed;
-            top: 0;
-            left: 0;
-        }
-        
-        /* UI Overlay */
-        .ui-overlay {
-            position: fixed;
-            bottom: 20px;
-            left: 0;
-            right: 0;
-            pointer-events: none;
-            z-index: 100;
-        }
-        
-        /* Joystick Container */
-        .joystick-container {
-            position: fixed;
-            bottom: 30px;
-            left: 30px;
-            width: 140px;
-            height: 140px;
-            pointer-events: auto;
-            z-index: 200;
-        }
-        
-        /* Settings Button */
-        .settings-btn {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            width: 50px;
-            height: 50px;
-            background: rgba(0,0,0,0.7);
-            backdrop-filter: blur(10px);
-            border-radius: 25px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            pointer-events: auto;
-            z-index: 200;
-            border: 1px solid rgba(255,255,255,0.2);
-            transition: all 0.3s ease;
-        }
-        
-        .settings-btn:hover {
-            background: rgba(255,255,255,0.2);
-            transform: scale(1.05);
-        }
-        
-        .settings-btn svg {
-            width: 28px;
-            height: 28px;
-            fill: white;
-        }
-        
-        /* Score Panel */
-        .score-panel {
-            position: fixed;
-            top: 20px;
-            left: 20px;
-            background: rgba(0,0,0,0.6);
-            backdrop-filter: blur(10px);
-            padding: 10px 20px;
-            border-radius: 30px;
-            color: white;
-            font-weight: bold;
-            font-size: 18px;
-            font-family: monospace;
-            letter-spacing: 2px;
-            pointer-events: none;
-            z-index: 200;
-            border: 1px solid rgba(255,215,0,0.3);
-        }
-        
-        .score-panel span {
-            color: #ffd700;
-            font-size: 24px;
-        }
-        
-        /* Settings Modal */
-        .settings-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.95);
-            backdrop-filter: blur(20px);
-            z-index: 1000;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            pointer-events: auto;
-        }
-        
-        .settings-modal.active {
-            display: flex;
-        }
-        
-        .settings-content {
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-            border-radius: 40px;
-            padding: 30px;
-            width: 90%;
-            max-width: 400px;
-            border: 1px solid rgba(255,255,255,0.1);
-            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
-        }
-        
-        .settings-content h2 {
-            color: white;
-            text-align: center;
-            margin-bottom: 25px;
-            font-size: 28px;
-        }
-        
-        .setting-item {
-            margin-bottom: 25px;
-        }
-        
-        .setting-label {
-            color: #aaa;
-            margin-bottom: 10px;
-            display: block;
-            font-size: 14px;
-            letter-spacing: 1px;
-        }
-        
-        .character-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 15px;
-            margin-top: 10px;
-        }
-        
-        .character-card {
-            background: rgba(255,255,255,0.1);
-            border-radius: 20px;
-            padding: 15px 10px;
-            text-align: center;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            border: 2px solid transparent;
-        }
-        
-        .character-card.selected {
-            border-color: #ffd700;
-            background: rgba(255,215,0,0.2);
-            transform: scale(1.02);
-        }
-        
-        .character-card:hover {
-            background: rgba(255,255,255,0.2);
-        }
-        
-        .character-emoji {
-            font-size: 48px;
-            display: block;
-            margin-bottom: 8px;
-        }
-        
-        .character-name {
-            color: white;
-            font-size: 12px;
-        }
-        
-        .sound-toggle {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            background: rgba(255,255,255,0.1);
-            padding: 12px 20px;
-            border-radius: 30px;
-            cursor: pointer;
-        }
-        
-        .sound-toggle span {
-            color: white;
-        }
-        
-        .toggle-switch {
-            width: 50px;
-            height: 26px;
-            background: #333;
-            border-radius: 13px;
-            position: relative;
-            transition: all 0.3s;
-        }
-        
-        .toggle-switch.active {
-            background: #ffd700;
-        }
-        
-        .toggle-switch::after {
-            content: '';
-            position: absolute;
-            width: 22px;
-            height: 22px;
-            background: white;
-            border-radius: 11px;
-            top: 2px;
-            left: 2px;
-            transition: all 0.3s;
-        }
-        
-        .toggle-switch.active::after {
-            left: 26px;
-        }
-        
-        .close-settings {
-            width: 100%;
-            padding: 14px;
-            background: linear-gradient(135deg, #ffd700, #ff8c00);
-            border: none;
-            border-radius: 30px;
-            color: #1a1a2e;
-            font-weight: bold;
-            font-size: 16px;
-            cursor: pointer;
-            margin-top: 20px;
-            transition: transform 0.2s;
-        }
-        
-        .close-settings:active {
-            transform: scale(0.98);
-        }
-        
-        /* Mobile optimizations */
-        @media (max-width: 768px) {
-            .joystick-container {
-                width: 120px;
-                height: 120px;
-                bottom: 20px;
-                left: 20px;
-            }
-            .score-panel {
-                font-size: 14px;
-                padding: 6px 15px;
-            }
-            .score-panel span {
-                font-size: 20px;
-            }
-        }
-        
-        /* Loading */
-        .loading {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            color: white;
-            font-size: 20px;
-            z-index: 10000;
-        }
-    </style>
-</head>
-<body>
-    <div class="loading" id="loading">LOADING ASSETS...</div>
-    
-    <canvas id="gameCanvas"></canvas>
-    
-    <div class="ui-overlay">
-        <div class="score-panel">
-            🏆 SCORE: <span id="scoreValue">0</span>
-        </div>
-        
-        <div class="settings-btn" id="settingsBtn">
-            <svg viewBox="0 0 24 24">
-                <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.33-.02-.64-.06-.94l2.02-1.58c.18-.14.23-.38.12-.56l-1.89-3.28c-.12-.19-.36-.26-.56-.18l-2.38.96c-.5-.38-1.06-.68-1.66-.88L14.45 3.5c-.04-.2-.2-.34-.4-.34h-3.78c-.2 0-.36.14-.4.34l-.3 2.52c-.6.2-1.16.5-1.66.88l-2.38-.96c-.2-.08-.44-.01-.56.18l-1.89 3.28c-.12.19-.07.42.12.56l2.02 1.58c-.04.3-.06.61-.06.94 0 .33.02.64.06.94l-2.02 1.58c-.18.14-.23.38-.12.56l1.89 3.28c.12.19.36.26.56.18l2.38-.96c.5.38 1.06.68 1.66.88l.3 2.52c.04.2.2.34.4.34h3.78c.2 0 .36-.14.4-.34l.3-2.52c.6-.2 1.16-.5 1.66-.88l2.38.96c.2.08.44.01.56-.18l1.89-3.28c.12-.19.07-.42-.12-.56l-2.02-1.58zM12 15c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z"/>
-            </svg>
-        </div>
-        
-        <div id="joystickZone" class="joystick-container"></div>
-    </div>
-    
-    <div class="settings-modal" id="settingsModal">
-        <div class="settings-content">
-            <h2>⚙️ SETTINGS</h2>
-            
-            <div class="setting-item">
-                <div class="setting-label">🎭 SELECT CHARACTER</div>
-                <div class="character-grid" id="characterGrid">
-                    <div class="character-card" data-character="warrior">
-                        <span class="character-emoji">⚔️</span>
-                        <span class="character-name">WARRIOR</span>
-                    </div>
-                    <div class="character-card" data-character="mage">
-                        <span class="character-emoji">🔮</span>
-                        <span class="character-name">MAGE</span>
-                    </div>
-                    <div class="character-card" data-character="rogue">
-                        <span class="character-emoji">🗡️</span>
-                        <span class="character-name">ROGUE</span>
-                    </div>
-                    <div class="character-card" data-character="knight">
-                        <span class="character-emoji">🛡️</span>
-                        <span class="character-name">KNIGHT</span>
-                    </div>
-                    <div class="character-card" data-character="archer">
-                        <span class="character-emoji">🏹</span>
-                        <span class="character-name">ARCHER</span>
-                    </div>
-                    <div class="character-card" data-character="dragon">
-                        <span class="character-emoji">🐉</span>
-                        <span class="character-name">DRAGON</span>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="setting-item">
-                <div class="setting-label">🔊 SOUND EFFECTS</div>
-                <div class="sound-toggle" id="soundToggle">
-                    <span>🔊 Sound ON</span>
-                    <div class="toggle-switch active" id="soundSwitch"></div>
-                </div>
-            </div>
-            
-            <button class="close-settings" id="closeSettings">✓ APPLY & CONTINUE</button>
-        </div>
-    </div>
-
-    <!-- Libraries -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/nipplejs@0.9.0/dist/nipplejs.min.js"></script>
-    
-    <script>
-        (function() {
-            // ==================== GAME STATE ====================
-            let score = 0;
-            let soundEnabled = true;
-            let selectedCharacter = 'warrior';
-            let gameRunning = true;
-            let moveDirection = { x: 0, z: 0 };
-            
-            // Audio context for simple sounds
-            let audioContext = null;
-            
-            function initAudio() {
-                if (!audioContext && soundEnabled) {
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                }
-            }
-            
-            function playSound(type) {
-                if (!soundEnabled || !audioContext) return;
-                try {
-                    const oscillator = audioContext.createOscillator();
-                    const gain = audioContext.createGain();
-                    oscillator.connect(gain);
-                    gain.connect(audioContext.destination);
-                    
-                    if (type === 'pickup') {
-                        oscillator.frequency.value = 880;
-                        gain.gain.value = 0.15;
-                        oscillator.type = 'sine';
-                        gain.gain.exponentialRampToValueAtTime(0.00001, audioContext.currentTime + 0.3);
-                    } else if (type === 'step') {
-                        oscillator.frequency.value = 440;
-                        gain.gain.value = 0.05;
-                        oscillator.type = 'triangle';
-                        gain.gain.exponentialRampToValueAtTime(0.00001, audioContext.currentTime + 0.1);
-                    }
-                    oscillator.start();
-                    oscillator.stop(audioContext.currentTime + 0.2);
-                } catch(e) {}
-            }
-            
-            // ==================== THREE.JS SETUP ====================
-            const canvas = document.getElementById('gameCanvas');
-            const scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x0a0a1a);
-            scene.fog = new THREE.FogExp2(0x0a0a1a, 0.008);
-            
-            // Camera (Third Person)
-            const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 4, 8);
-            
-            const renderer = new THREE.WebGLRenderer({ canvas, alpha: false });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true;
-            
-            // ==================== LIGHTS ====================
-            // Ambient
-            const ambientLight = new THREE.AmbientLight(0x404060);
-            scene.add(ambientLight);
-            
-            // Main directional light
-            const dirLight = new THREE.DirectionalLight(0xffffff, 1);
-            dirLight.position.set(5, 10, 7);
-            dirLight.castShadow = true;
-            dirLight.receiveShadow = true;
-            dirLight.shadow.mapSize.width = 1024;
-            dirLight.shadow.mapSize.height = 1024;
-            scene.add(dirLight);
-            
-            // Fill light
-            const fillLight = new THREE.PointLight(0x4466cc, 0.3);
-            fillLight.position.set(-2, 3, 4);
-            scene.add(fillLight);
-            
-            // Back rim light
-            const rimLight = new THREE.PointLight(0xffaa66, 0.4);
-            rimLight.position.set(0, 3, -5);
-            scene.add(rimLight);
-            
-            // Ground light
-            const groundLight = new THREE.PointLight(0x88aaff, 0.2);
-            groundLight.position.set(0, -1, 0);
-            scene.add(groundLight);
-            
-            // ==================== ROAD SYSTEM ====================
-            const roadSegments = [];
-            const segmentLength = 20;
-            const visibleSegments = 15;
-            let currentRoadZ = 0;
-            
-            function createRoadSegment(zPos) {
-                const group = new THREE.Group();
-                
-                // Main road (asphalt)
-                const roadMat = new THREE.MeshStandardMaterial({ color: 0x2a2a3a, roughness: 0.7, metalness: 0.1 });
-                const road = new THREE.Mesh(new THREE.PlaneGeometry(6, segmentLength), roadMat);
-                road.rotation.x = -Math.PI / 2;
-                road.position.y = -0.05;
-                road.receiveShadow = true;
-                group.add(road);
-                
-                // Road lines
-                const lineMat = new THREE.MeshStandardMaterial({ color: 0xffdd88, emissive: 0x442200 });
-                for (let i = -segmentLength/2 + 1; i < segmentLength/2; i += 2) {
-                    const line = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.05, 0.5), lineMat);
-                    line.position.set(0, -0.02, i);
-                    line.castShadow = true;
-                    group.add(line);
-                }
-                
-                // Side lines
-                const sideMat = new THREE.MeshStandardMaterial({ color: 0xffaa66 });
-                const leftLine = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, segmentLength), sideMat);
-                leftLine.position.set(-2.8, -0.03, 0);
-                group.add(leftLine);
-                
-                const rightLine = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, segmentLength), sideMat);
-                rightLine.position.set(2.8, -0.03, 0);
-                group.add(rightLine);
-                
-                // Decorative elements (trees/lamps on sides)
-                const colors = [0x44aa44, 0x55bb55, 0x338833];
-                for (let side = -1; side <= 1; side += 2) {
-                    for (let i = -6; i <= 6; i += 4) {
-                        const treeGroup = new THREE.Group();
-                        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, 0.8, 4), new THREE.MeshStandardMaterial({ color: 0x8B5A2B }));
-                        trunk.position.y = 0.4;
-                        treeGroup.add(trunk);
-                        const foliage = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.6, 6), new THREE.MeshStandardMaterial({ color: colors[Math.floor(Math.random() * colors.length)] }));
-                        foliage.position.y = 0.8;
-                        treeGroup.add(foliage);
-                        treeGroup.position.set(side * 3.8, -0.2, i);
-                        treeGroup.castShadow = true;
-                        group.add(treeGroup);
-                    }
-                }
-                
-                group.position.z = zPos;
-                return group;
-            }
-            
-            function initRoad() {
-                for (let i = 0; i < visibleSegments; i++) {
-                    const segment = createRoadSegment(i * segmentLength - visibleSegments * segmentLength / 2);
-                    scene.add(segment);
-                    roadSegments.push(segment);
-                }
-                currentRoadZ = (visibleSegments - 1) * segmentLength - visibleSegments * segmentLength / 2;
-            }
-            
-            function updateRoad(playerZ) {
-                const threshold = 15;
-                for (let seg of roadSegments) {
-                    if (seg.position.z + threshold < playerZ) {
-                        seg.position.z += roadSegments.length * segmentLength;
-                    }
-                }
-            }
-            
-            // ==================== PLAYER CHARACTER ====================
-            const playerGroup = new THREE.Group();
-            
-            function createCharacter(type) {
-                // Clear existing
-                while(playerGroup.children.length > 0) {
-                    playerGroup.remove(playerGroup.children[0]);
-                }
-                
-                const colors = {
-                    warrior: 0xcc4444,
-                    mage: 0x6644cc,
-                    rogue: 0x44aa44,
-                    knight: 0x88aaff,
-                    archer: 0xdd8844,
-                    dragon: 0xdd3333
-                };
-                
-                const bodyColor = colors[type] || 0xcc4444;
-                
-                // Body
-                const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.2, 8), new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.3, metalness: 0.1 }));
-                body.castShadow = true;
-                body.receiveShadow = true;
-                body.position.y = 0.6;
-                playerGroup.add(body);
-                
-                // Head
-                const head = new THREE.Mesh(new THREE.SphereGeometry(0.45, 16, 16), new THREE.MeshStandardMaterial({ color: 0xffccaa, roughness: 0.2 }));
-                head.castShadow = true;
-                head.position.y = 1.2;
-                playerGroup.add(head);
-                
-                // Helmet/Accessory based on type
-                if (type === 'warrior') {
-                    const helmet = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.5, 6), new THREE.MeshStandardMaterial({ color: 0xcc8844, metalness: 0.8 }));
-                    helmet.position.y = 1.45;
-                    playerGroup.add(helmet);
-                    
-                    const sword = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.8, 0.1), new THREE.MeshStandardMaterial({ color: 0xccccdd, metalness: 0.9 }));
-                    sword.position.set(0.6, 0.8, 0.3);
-                    playerGroup.add(sword);
-                } else if (type === 'mage') {
-                    const hat = new THREE.Mesh(new THREE.ConeGeometry(0.55, 0.7, 8), new THREE.MeshStandardMaterial({ color: 0x6644aa }));
-                    hat.position.y = 1.45;
-                    playerGroup.add(hat);
-                    
-                    const staff = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 1.2, 6), new THREE.MeshStandardMaterial({ color: 0xaa8866 }));
-                    staff.position.set(0.5, 1.0, 0.4);
-                    playerGroup.add(staff);
-                } else if (type === 'rogue') {
-                    const hood = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.55, 0.4, 8), new THREE.MeshStandardMaterial({ color: 0x336633 }));
-                    hood.position.y = 1.4;
-                    playerGroup.add(hood);
-                    
-                    const daggers = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.1, 0.5, 4), new THREE.MeshStandardMaterial({ color: 0xccccaa }));
-                    daggers.position.set(0.55, 0.9, 0.25);
-                    playerGroup.add(daggers);
-                } else if (type === 'dragon') {
-                    // Make it dragon-like
-                    body.scale.set(0.8, 0.7, 0.9);
-                    const wings = new THREE.Mesh(new THREE.ConeGeometry(0.7, 0.1, 3), new THREE.MeshStandardMaterial({ color: 0xdd5533 }));
-                    wings.position.set(0, 0.9, -0.3);
-                    wings.rotation.x = 0.5;
-                    playerGroup.add(wings);
-                    
-                    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.6, 4), new THREE.MeshStandardMaterial({ color: 0xdd5533 }));
-                    tail.position.set(-0.2, 0.3, -0.6);
-                    tail.rotation.x = 0.7;
-                    playerGroup.add(tail);
-                }
-                
-                // Eyes
-                const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
-                const leftEye = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 16), eyeMat);
-                leftEye.position.set(-0.18, 1.32, 0.45);
-                playerGroup.add(leftEye);
-                const rightEye = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 16), eyeMat);
-                rightEye.position.set(0.18, 1.32, 0.45);
-                playerGroup.add(rightEye);
-                
-                const pupilMat = new THREE.MeshStandardMaterial({ color: 0x000000 });
-                const leftPupil = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 16), pupilMat);
-                leftPupil.position.set(-0.18, 1.31, 0.52);
-                playerGroup.add(leftPupil);
-                const rightPupil = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 16), pupilMat);
-                rightPupil.position.set(0.18, 1.31, 0.52);
-                playerGroup.add(rightPupil);
-            }
-            
-            createCharacter(selectedCharacter);
-            playerGroup.position.set(0, 0, 0);
-            playerGroup.castShadow = true;
-            scene.add(playerGroup);
-            
-            // ==================== COLLECTIBLES ====================
-            const collectibles = [];
-            
-            function spawnCollectible() {
-                const types = ['⭐', '💎', '💰', '✨'];
-                const geometry = new THREE.SphereGeometry(0.3, 8, 8);
-                const material = new THREE.MeshStandardMaterial({ color: 0xffaa44, emissive: 0x442200 });
-                const collectible = new THREE.Mesh(geometry, material);
-                collectible.userData = { value: 10, type: types[Math.floor(Math.random() * types.length)] };
-                collectible.position.x = (Math.random() - 0.5) * 4;
-                collectible.position.z = 15 + Math.random() * 30;
-                collectible.position.y = 0.3;
-                collectible.castShadow = true;
-                scene.add(collectible);
-                collectibles.push(collectible);
-            }
-            
-            function updateCollectibles(playerPos) {
-                for (let i = collectibles.length-1; i >= 0; i--) {
-                    const c = collectibles[i];
-                    c.position.z -= 0.15; // Move towards player
-                    
-                    // Check collision
-                    const dx = playerPos.x - c.position.x;
-                    const dz = playerPos.z - c.position.z;
-                    const dist = Math.sqrt(dx*dx + dz*dz);
-                    if (dist < 0.8) {
-                        score += c.userData.value;
-                        document.getElementById('scoreValue').innerText = score;
-                        scene.remove(c);
-                        collectibles.splice(i,1);
-                        playSound('pickup');
-                        
-                        // Visual feedback
-                        const particles = [];
-                        for(let p=0; p<10; p++) {
-                            const particle = new THREE.Mesh(new THREE.SphereGeometry(0.08,4,4), new THREE.MeshStandardMaterial({ color: 0xffaa66 }));
-                            particle.position.copy(c.position);
-                            scene.add(particle);
-                            particles.push(particle);
-                        }
-                        setTimeout(() => particles.forEach(p => scene.remove(p)), 300);
-                    }
-                    
-                    // Remove if too far behind
-                    if (c.position.z < playerPos.z - 10) {
-                        scene.remove(c);
-                        collectibles.splice(i,1);
-                    }
-                }
-                
-                // Spawn new collectibles
-                if (Math.random() < 0.02 && collectibles.length < 25) {
-                    spawnCollectible();
-                }
-            }
-            
-            // ==================== JOYSTICK ====================
-            let joystick = null;
-            const joystickZone = document.getElementById('joystickZone');
-            
-            function initJoystick() {
-                if (joystick) joystick.destroy();
-                joystick = nipplejs.create({
-                    zone: joystickZone,
-                    mode: 'static',
-                    lockY: false,
-                    lockX: false,
-                    restOpacity: 0.5,
-                    size: 120,
-                    color: 'white',
-                    background: 'rgba(0,0,0,0.4)'
-                });
-                
-                joystick.on('move', (evt, nipple) => {
-                    const vector = nipple.vector;
-                    const angle = vector.angle;
-                    const force = Math.min(vector.magnitude / 60, 1);
-                    moveDirection.x = Math.cos(angle * Math.PI / 180) * force;
-                    moveDirection.z = Math.sin(angle * Math.PI / 180) * force;
-                }).on('end', () => {
-                    moveDirection.x = 0;
-                    moveDirection.z = 0;
-                });
-            }
-            
-            initJoystick();
-            
-            // ==================== ANIMATION LOOP ====================
-            let lastTime = performance.now();
-            let playerVelocity = 0;
-            const playerSpeed = 5.5;
-            
-            function animate() {
-                if (!gameRunning) return;
-                
-                const now = performance.now();
-                let delta = Math.min(0.033, (now - lastTime) / 1000);
-                lastTime = now;
-                
-                // Movement
-                let moveX = moveDirection.x * playerSpeed * delta;
-                let moveZ = moveDirection.z * playerSpeed * delta;
-                
-                // Boundary limits
-                let newX = playerGroup.position.x + moveX;
-                newX = Math.max(-3.2, Math.min(3.2, newX));
-                playerGroup.position.x = newX;
-                
-                // Forward movement (auto-run)
-                playerGroup.position.z += 0.12 + (Math.abs(moveDirection.x) * 0.05);
-                
-                // Rotation based on movement
-                if (moveDirection.x !== 0) {
-                    playerGroup.rotation.y = moveDirection.x * 0.5;
-                } else {
-                    playerGroup.rotation.y *= 0.95;
-                }
-                
-                // Bobbing effect
-                const bob = Math.sin(Date.now() * 0.015) * 0.02;
-                playerGroup.position.y = bob;
-                
-                // Update road
-                updateRoad(playerGroup.position.z);
-                
-                // Update collectibles
-                updateCollectibles(playerGroup.position);
-                
-                // Camera follow (third person)
-                const targetCameraPos = {
-                    x: playerGroup.position.x * 0.5,
-                    y: 3.5 + Math.abs(moveDirection.z) * 0.5,
-                    z: playerGroup.position.z - 5
-                };
-                camera.position.x += (targetCameraPos.x - camera.position.x) * 0.1;
-                camera.position.y += (targetCameraPos.y - camera.position.y) * 0.1;
-                camera.position.z += (targetCameraPos.z - camera.position.z) * 0.1;
-                camera.lookAt(playerGroup.position);
-                
-                // Spawn occasional collectibles
-                if (Math.random() < 0.015) spawnCollectible();
-                
-                renderer.render(scene, camera);
-                requestAnimationFrame(animate);
-            }
-            
-            // Spawn initial collectibles
-            for(let i=0; i<15; i++) spawnCollectible();
-            
-            // Start animation after loading
-            setTimeout(() => {
-                document.getElementById('loading').style.display = 'none';
-                initAudio();
-                animate();
-            }, 500);
-            
-            // ==================== UI EVENT HANDLERS ====================
-            document.getElementById('settingsBtn').addEventListener('click', () => {
-                gameRunning = false;
-                document.getElementById('settingsModal').classList.add('active');
-            });
-            
-            document.getElementById('closeSettings').addEventListener('click', () => {
-                gameRunning = true;
-                document.getElementById('settingsModal').classList.remove('active');
-                lastTime = performance.now();
-            });
-            
-            // Character selection
-            document.querySelectorAll('.character-card').forEach(card => {
-                card.addEventListener('click', () => {
-                    document.querySelectorAll('.character-card').forEach(c => c.classList.remove('selected'));
-                    card.classList.add('selected');
-                    selectedCharacter = card.dataset.character;
-                    createCharacter(selectedCharacter);
-                    playSound('pickup');
-                });
-            });
-            
-            // Sound toggle
-            const soundToggle = document.getElementById('soundToggle');
-            const soundSwitch = document.getElementById('soundSwitch');
-            soundToggle.addEventListener('click', () => {
-                soundEnabled = !soundEnabled;
-                if (soundEnabled) {
-                    soundSwitch.classList.add('active');
-                    soundToggle.querySelector('span').innerHTML = '🔊 Sound ON';
-                    initAudio();
-                } else {
-                    soundSwitch.classList.remove('active');
-                    soundToggle.querySelector('span').innerHTML = '🔇 Sound OFF';
-                }
-            });
-            
-            // Handle window resize
-            window.addEventListener('resize', () => {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
-            });
-            
-            // Touch start to enable audio
-            const enableAudio = () => {
-                initAudio();
-                document.removeEventListener('touchstart', enableAudio);
-                document.removeEventListener('click', enableAudio);
-            };
-            document.addEventListener('touchstart', enableAudio);
-            document.addEventListener('click', enableAudio);
-            
-            // Default select warrior
-            document.querySelector('.character-card[data-character="warrior"]').classList.add('selected');
-        })();
-    </script>
-</body>
-</html>
-EOF
-      
-      - name: Create README
-        run: |
-          cat > dist/README.md << 'EOF'
-# ROAD WARRIOR - AAA Mobile Game
-
-A fully playable 3D endless runner game with third-person perspective, on-screen joystick, character selection, and sound effects.
-
-## How to Play
-- Use the on-screen joystick to move left/right
-- Collect glowing orbs for points
-- Avoid falling off the road
-- Change characters in Settings
-- Toggle sound effects
-
-## Install on iPhone (as Web App)
-1. Open Safari and go to your GitHub Pages URL
-2. Tap Share button → "Add to Home Screen"
-3. Play like a native app!
-
-## Features
-- 🎮 On-screen analog joystick
-- 👥 6 playable characters
-- 🌟 Endless procedurally generated road
-- 🎵 Sound effects
-- ⚙️ Settings menu
-- 📱 Mobile-optimized touch controls
-
-## Play Now
-Visit: https://[your-github-username].github.io/[repo-name]/
-EOF
-      
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
-          publish_branch: gh-pages
-      
-      - name: Output success message
-        run: |
-          echo "✅ GAME BUILT SUCCESSFULLY!"
-          echo "📱 Your game will be available at:"
-          echo "   https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
-          echo ""
-          echo "🔄 GitHub Pages may take 1-2 minutes to deploy"
-EOF
+          echo "╔═══════════════════════════════════════════╗"
+          echo "║  🚀 INFINITE ROAD RUNNER – BUILD DONE     ║"
+          echo "╠═══════════════════════════════════════════╣"
+          echo "║  FEATURES INCLUDED:                       ║"
+          echo "║  ✅ PS5-style on-screen joystick           ║"
+          echo "║  ✅ AAA humanoid character with animation ║"
+          echo "║  ✅ Unlimited procedural road             ║"
+          echo "║  ✅ Main menu + settings + char select    ║"
+          echo "║  ✅ Sound effects & BGM (WAV generated)   ║"
+          echo "╠═══════════════════════════════════════════╣"
+          echo "║  SIDELOAD:                                ║"
+          echo "║  Download IPA → AltStore / Sideloadly    ║"
+          echo "╚═══════════════════════════════════════════╝"
