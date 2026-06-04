@@ -1,0 +1,901 @@
+name: Build and Deploy AAA Game
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Create game directory
+        run: mkdir -p dist
+      
+      - name: Create index.html
+        run: |
+          cat > dist/index.html << 'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#1a1a2e">
+    <title>ROAD WARRIOR - AAA Mobile Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        body {
+            overflow: hidden;
+            font-family: 'Segoe UI', 'Poppins', system-ui, -apple-system, sans-serif;
+            background: #0a0a1a;
+        }
+        
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            position: fixed;
+            top: 0;
+            left: 0;
+        }
+        
+        /* UI Overlay */
+        .ui-overlay {
+            position: fixed;
+            bottom: 20px;
+            left: 0;
+            right: 0;
+            pointer-events: none;
+            z-index: 100;
+        }
+        
+        /* Joystick Container */
+        .joystick-container {
+            position: fixed;
+            bottom: 30px;
+            left: 30px;
+            width: 140px;
+            height: 140px;
+            pointer-events: auto;
+            z-index: 200;
+        }
+        
+        /* Settings Button */
+        .settings-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 50px;
+            height: 50px;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(10px);
+            border-radius: 25px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            pointer-events: auto;
+            z-index: 200;
+            border: 1px solid rgba(255,255,255,0.2);
+            transition: all 0.3s ease;
+        }
+        
+        .settings-btn:hover {
+            background: rgba(255,255,255,0.2);
+            transform: scale(1.05);
+        }
+        
+        .settings-btn svg {
+            width: 28px;
+            height: 28px;
+            fill: white;
+        }
+        
+        /* Score Panel */
+        .score-panel {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(10px);
+            padding: 10px 20px;
+            border-radius: 30px;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+            font-family: monospace;
+            letter-spacing: 2px;
+            pointer-events: none;
+            z-index: 200;
+            border: 1px solid rgba(255,215,0,0.3);
+        }
+        
+        .score-panel span {
+            color: #ffd700;
+            font-size: 24px;
+        }
+        
+        /* Settings Modal */
+        .settings-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.95);
+            backdrop-filter: blur(20px);
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+        }
+        
+        .settings-modal.active {
+            display: flex;
+        }
+        
+        .settings-content {
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            border-radius: 40px;
+            padding: 30px;
+            width: 90%;
+            max-width: 400px;
+            border: 1px solid rgba(255,255,255,0.1);
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+        }
+        
+        .settings-content h2 {
+            color: white;
+            text-align: center;
+            margin-bottom: 25px;
+            font-size: 28px;
+        }
+        
+        .setting-item {
+            margin-bottom: 25px;
+        }
+        
+        .setting-label {
+            color: #aaa;
+            margin-bottom: 10px;
+            display: block;
+            font-size: 14px;
+            letter-spacing: 1px;
+        }
+        
+        .character-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-top: 10px;
+        }
+        
+        .character-card {
+            background: rgba(255,255,255,0.1);
+            border-radius: 20px;
+            padding: 15px 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+        }
+        
+        .character-card.selected {
+            border-color: #ffd700;
+            background: rgba(255,215,0,0.2);
+            transform: scale(1.02);
+        }
+        
+        .character-card:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        
+        .character-emoji {
+            font-size: 48px;
+            display: block;
+            margin-bottom: 8px;
+        }
+        
+        .character-name {
+            color: white;
+            font-size: 12px;
+        }
+        
+        .sound-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: rgba(255,255,255,0.1);
+            padding: 12px 20px;
+            border-radius: 30px;
+            cursor: pointer;
+        }
+        
+        .sound-toggle span {
+            color: white;
+        }
+        
+        .toggle-switch {
+            width: 50px;
+            height: 26px;
+            background: #333;
+            border-radius: 13px;
+            position: relative;
+            transition: all 0.3s;
+        }
+        
+        .toggle-switch.active {
+            background: #ffd700;
+        }
+        
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            width: 22px;
+            height: 22px;
+            background: white;
+            border-radius: 11px;
+            top: 2px;
+            left: 2px;
+            transition: all 0.3s;
+        }
+        
+        .toggle-switch.active::after {
+            left: 26px;
+        }
+        
+        .close-settings {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #ffd700, #ff8c00);
+            border: none;
+            border-radius: 30px;
+            color: #1a1a2e;
+            font-weight: bold;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: transform 0.2s;
+        }
+        
+        .close-settings:active {
+            transform: scale(0.98);
+        }
+        
+        /* Mobile optimizations */
+        @media (max-width: 768px) {
+            .joystick-container {
+                width: 120px;
+                height: 120px;
+                bottom: 20px;
+                left: 20px;
+            }
+            .score-panel {
+                font-size: 14px;
+                padding: 6px 15px;
+            }
+            .score-panel span {
+                font-size: 20px;
+            }
+        }
+        
+        /* Loading */
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 20px;
+            z-index: 10000;
+        }
+    </style>
+</head>
+<body>
+    <div class="loading" id="loading">LOADING ASSETS...</div>
+    
+    <canvas id="gameCanvas"></canvas>
+    
+    <div class="ui-overlay">
+        <div class="score-panel">
+            🏆 SCORE: <span id="scoreValue">0</span>
+        </div>
+        
+        <div class="settings-btn" id="settingsBtn">
+            <svg viewBox="0 0 24 24">
+                <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.33-.02-.64-.06-.94l2.02-1.58c.18-.14.23-.38.12-.56l-1.89-3.28c-.12-.19-.36-.26-.56-.18l-2.38.96c-.5-.38-1.06-.68-1.66-.88L14.45 3.5c-.04-.2-.2-.34-.4-.34h-3.78c-.2 0-.36.14-.4.34l-.3 2.52c-.6.2-1.16.5-1.66.88l-2.38-.96c-.2-.08-.44-.01-.56.18l-1.89 3.28c-.12.19-.07.42.12.56l2.02 1.58c-.04.3-.06.61-.06.94 0 .33.02.64.06.94l-2.02 1.58c-.18.14-.23.38-.12.56l1.89 3.28c.12.19.36.26.56.18l2.38-.96c.5.38 1.06.68 1.66.88l.3 2.52c.04.2.2.34.4.34h3.78c.2 0 .36-.14.4-.34l.3-2.52c.6-.2 1.16-.5 1.66-.88l2.38.96c.2.08.44.01.56-.18l1.89-3.28c.12-.19.07-.42-.12-.56l-2.02-1.58zM12 15c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z"/>
+            </svg>
+        </div>
+        
+        <div id="joystickZone" class="joystick-container"></div>
+    </div>
+    
+    <div class="settings-modal" id="settingsModal">
+        <div class="settings-content">
+            <h2>⚙️ SETTINGS</h2>
+            
+            <div class="setting-item">
+                <div class="setting-label">🎭 SELECT CHARACTER</div>
+                <div class="character-grid" id="characterGrid">
+                    <div class="character-card" data-character="warrior">
+                        <span class="character-emoji">⚔️</span>
+                        <span class="character-name">WARRIOR</span>
+                    </div>
+                    <div class="character-card" data-character="mage">
+                        <span class="character-emoji">🔮</span>
+                        <span class="character-name">MAGE</span>
+                    </div>
+                    <div class="character-card" data-character="rogue">
+                        <span class="character-emoji">🗡️</span>
+                        <span class="character-name">ROGUE</span>
+                    </div>
+                    <div class="character-card" data-character="knight">
+                        <span class="character-emoji">🛡️</span>
+                        <span class="character-name">KNIGHT</span>
+                    </div>
+                    <div class="character-card" data-character="archer">
+                        <span class="character-emoji">🏹</span>
+                        <span class="character-name">ARCHER</span>
+                    </div>
+                    <div class="character-card" data-character="dragon">
+                        <span class="character-emoji">🐉</span>
+                        <span class="character-name">DRAGON</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="setting-item">
+                <div class="setting-label">🔊 SOUND EFFECTS</div>
+                <div class="sound-toggle" id="soundToggle">
+                    <span>🔊 Sound ON</span>
+                    <div class="toggle-switch active" id="soundSwitch"></div>
+                </div>
+            </div>
+            
+            <button class="close-settings" id="closeSettings">✓ APPLY & CONTINUE</button>
+        </div>
+    </div>
+
+    <!-- Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/nipplejs@0.9.0/dist/nipplejs.min.js"></script>
+    
+    <script>
+        (function() {
+            // ==================== GAME STATE ====================
+            let score = 0;
+            let soundEnabled = true;
+            let selectedCharacter = 'warrior';
+            let gameRunning = true;
+            let moveDirection = { x: 0, z: 0 };
+            
+            // Audio context for simple sounds
+            let audioContext = null;
+            
+            function initAudio() {
+                if (!audioContext && soundEnabled) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            }
+            
+            function playSound(type) {
+                if (!soundEnabled || !audioContext) return;
+                try {
+                    const oscillator = audioContext.createOscillator();
+                    const gain = audioContext.createGain();
+                    oscillator.connect(gain);
+                    gain.connect(audioContext.destination);
+                    
+                    if (type === 'pickup') {
+                        oscillator.frequency.value = 880;
+                        gain.gain.value = 0.15;
+                        oscillator.type = 'sine';
+                        gain.gain.exponentialRampToValueAtTime(0.00001, audioContext.currentTime + 0.3);
+                    } else if (type === 'step') {
+                        oscillator.frequency.value = 440;
+                        gain.gain.value = 0.05;
+                        oscillator.type = 'triangle';
+                        gain.gain.exponentialRampToValueAtTime(0.00001, audioContext.currentTime + 0.1);
+                    }
+                    oscillator.start();
+                    oscillator.stop(audioContext.currentTime + 0.2);
+                } catch(e) {}
+            }
+            
+            // ==================== THREE.JS SETUP ====================
+            const canvas = document.getElementById('gameCanvas');
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0a1a);
+            scene.fog = new THREE.FogExp2(0x0a0a1a, 0.008);
+            
+            // Camera (Third Person)
+            const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 4, 8);
+            
+            const renderer = new THREE.WebGLRenderer({ canvas, alpha: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            
+            // ==================== LIGHTS ====================
+            // Ambient
+            const ambientLight = new THREE.AmbientLight(0x404060);
+            scene.add(ambientLight);
+            
+            // Main directional light
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+            dirLight.position.set(5, 10, 7);
+            dirLight.castShadow = true;
+            dirLight.receiveShadow = true;
+            dirLight.shadow.mapSize.width = 1024;
+            dirLight.shadow.mapSize.height = 1024;
+            scene.add(dirLight);
+            
+            // Fill light
+            const fillLight = new THREE.PointLight(0x4466cc, 0.3);
+            fillLight.position.set(-2, 3, 4);
+            scene.add(fillLight);
+            
+            // Back rim light
+            const rimLight = new THREE.PointLight(0xffaa66, 0.4);
+            rimLight.position.set(0, 3, -5);
+            scene.add(rimLight);
+            
+            // Ground light
+            const groundLight = new THREE.PointLight(0x88aaff, 0.2);
+            groundLight.position.set(0, -1, 0);
+            scene.add(groundLight);
+            
+            // ==================== ROAD SYSTEM ====================
+            const roadSegments = [];
+            const segmentLength = 20;
+            const visibleSegments = 15;
+            let currentRoadZ = 0;
+            
+            function createRoadSegment(zPos) {
+                const group = new THREE.Group();
+                
+                // Main road (asphalt)
+                const roadMat = new THREE.MeshStandardMaterial({ color: 0x2a2a3a, roughness: 0.7, metalness: 0.1 });
+                const road = new THREE.Mesh(new THREE.PlaneGeometry(6, segmentLength), roadMat);
+                road.rotation.x = -Math.PI / 2;
+                road.position.y = -0.05;
+                road.receiveShadow = true;
+                group.add(road);
+                
+                // Road lines
+                const lineMat = new THREE.MeshStandardMaterial({ color: 0xffdd88, emissive: 0x442200 });
+                for (let i = -segmentLength/2 + 1; i < segmentLength/2; i += 2) {
+                    const line = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.05, 0.5), lineMat);
+                    line.position.set(0, -0.02, i);
+                    line.castShadow = true;
+                    group.add(line);
+                }
+                
+                // Side lines
+                const sideMat = new THREE.MeshStandardMaterial({ color: 0xffaa66 });
+                const leftLine = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, segmentLength), sideMat);
+                leftLine.position.set(-2.8, -0.03, 0);
+                group.add(leftLine);
+                
+                const rightLine = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, segmentLength), sideMat);
+                rightLine.position.set(2.8, -0.03, 0);
+                group.add(rightLine);
+                
+                // Decorative elements (trees/lamps on sides)
+                const colors = [0x44aa44, 0x55bb55, 0x338833];
+                for (let side = -1; side <= 1; side += 2) {
+                    for (let i = -6; i <= 6; i += 4) {
+                        const treeGroup = new THREE.Group();
+                        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, 0.8, 4), new THREE.MeshStandardMaterial({ color: 0x8B5A2B }));
+                        trunk.position.y = 0.4;
+                        treeGroup.add(trunk);
+                        const foliage = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.6, 6), new THREE.MeshStandardMaterial({ color: colors[Math.floor(Math.random() * colors.length)] }));
+                        foliage.position.y = 0.8;
+                        treeGroup.add(foliage);
+                        treeGroup.position.set(side * 3.8, -0.2, i);
+                        treeGroup.castShadow = true;
+                        group.add(treeGroup);
+                    }
+                }
+                
+                group.position.z = zPos;
+                return group;
+            }
+            
+            function initRoad() {
+                for (let i = 0; i < visibleSegments; i++) {
+                    const segment = createRoadSegment(i * segmentLength - visibleSegments * segmentLength / 2);
+                    scene.add(segment);
+                    roadSegments.push(segment);
+                }
+                currentRoadZ = (visibleSegments - 1) * segmentLength - visibleSegments * segmentLength / 2;
+            }
+            
+            function updateRoad(playerZ) {
+                const threshold = 15;
+                for (let seg of roadSegments) {
+                    if (seg.position.z + threshold < playerZ) {
+                        seg.position.z += roadSegments.length * segmentLength;
+                    }
+                }
+            }
+            
+            // ==================== PLAYER CHARACTER ====================
+            const playerGroup = new THREE.Group();
+            
+            function createCharacter(type) {
+                // Clear existing
+                while(playerGroup.children.length > 0) {
+                    playerGroup.remove(playerGroup.children[0]);
+                }
+                
+                const colors = {
+                    warrior: 0xcc4444,
+                    mage: 0x6644cc,
+                    rogue: 0x44aa44,
+                    knight: 0x88aaff,
+                    archer: 0xdd8844,
+                    dragon: 0xdd3333
+                };
+                
+                const bodyColor = colors[type] || 0xcc4444;
+                
+                // Body
+                const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.2, 8), new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.3, metalness: 0.1 }));
+                body.castShadow = true;
+                body.receiveShadow = true;
+                body.position.y = 0.6;
+                playerGroup.add(body);
+                
+                // Head
+                const head = new THREE.Mesh(new THREE.SphereGeometry(0.45, 16, 16), new THREE.MeshStandardMaterial({ color: 0xffccaa, roughness: 0.2 }));
+                head.castShadow = true;
+                head.position.y = 1.2;
+                playerGroup.add(head);
+                
+                // Helmet/Accessory based on type
+                if (type === 'warrior') {
+                    const helmet = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.5, 6), new THREE.MeshStandardMaterial({ color: 0xcc8844, metalness: 0.8 }));
+                    helmet.position.y = 1.45;
+                    playerGroup.add(helmet);
+                    
+                    const sword = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.8, 0.1), new THREE.MeshStandardMaterial({ color: 0xccccdd, metalness: 0.9 }));
+                    sword.position.set(0.6, 0.8, 0.3);
+                    playerGroup.add(sword);
+                } else if (type === 'mage') {
+                    const hat = new THREE.Mesh(new THREE.ConeGeometry(0.55, 0.7, 8), new THREE.MeshStandardMaterial({ color: 0x6644aa }));
+                    hat.position.y = 1.45;
+                    playerGroup.add(hat);
+                    
+                    const staff = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 1.2, 6), new THREE.MeshStandardMaterial({ color: 0xaa8866 }));
+                    staff.position.set(0.5, 1.0, 0.4);
+                    playerGroup.add(staff);
+                } else if (type === 'rogue') {
+                    const hood = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.55, 0.4, 8), new THREE.MeshStandardMaterial({ color: 0x336633 }));
+                    hood.position.y = 1.4;
+                    playerGroup.add(hood);
+                    
+                    const daggers = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.1, 0.5, 4), new THREE.MeshStandardMaterial({ color: 0xccccaa }));
+                    daggers.position.set(0.55, 0.9, 0.25);
+                    playerGroup.add(daggers);
+                } else if (type === 'dragon') {
+                    // Make it dragon-like
+                    body.scale.set(0.8, 0.7, 0.9);
+                    const wings = new THREE.Mesh(new THREE.ConeGeometry(0.7, 0.1, 3), new THREE.MeshStandardMaterial({ color: 0xdd5533 }));
+                    wings.position.set(0, 0.9, -0.3);
+                    wings.rotation.x = 0.5;
+                    playerGroup.add(wings);
+                    
+                    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.6, 4), new THREE.MeshStandardMaterial({ color: 0xdd5533 }));
+                    tail.position.set(-0.2, 0.3, -0.6);
+                    tail.rotation.x = 0.7;
+                    playerGroup.add(tail);
+                }
+                
+                // Eyes
+                const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+                const leftEye = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 16), eyeMat);
+                leftEye.position.set(-0.18, 1.32, 0.45);
+                playerGroup.add(leftEye);
+                const rightEye = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 16), eyeMat);
+                rightEye.position.set(0.18, 1.32, 0.45);
+                playerGroup.add(rightEye);
+                
+                const pupilMat = new THREE.MeshStandardMaterial({ color: 0x000000 });
+                const leftPupil = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 16), pupilMat);
+                leftPupil.position.set(-0.18, 1.31, 0.52);
+                playerGroup.add(leftPupil);
+                const rightPupil = new THREE.Mesh(new THREE.SphereGeometry(0.06, 16, 16), pupilMat);
+                rightPupil.position.set(0.18, 1.31, 0.52);
+                playerGroup.add(rightPupil);
+            }
+            
+            createCharacter(selectedCharacter);
+            playerGroup.position.set(0, 0, 0);
+            playerGroup.castShadow = true;
+            scene.add(playerGroup);
+            
+            // ==================== COLLECTIBLES ====================
+            const collectibles = [];
+            
+            function spawnCollectible() {
+                const types = ['⭐', '💎', '💰', '✨'];
+                const geometry = new THREE.SphereGeometry(0.3, 8, 8);
+                const material = new THREE.MeshStandardMaterial({ color: 0xffaa44, emissive: 0x442200 });
+                const collectible = new THREE.Mesh(geometry, material);
+                collectible.userData = { value: 10, type: types[Math.floor(Math.random() * types.length)] };
+                collectible.position.x = (Math.random() - 0.5) * 4;
+                collectible.position.z = 15 + Math.random() * 30;
+                collectible.position.y = 0.3;
+                collectible.castShadow = true;
+                scene.add(collectible);
+                collectibles.push(collectible);
+            }
+            
+            function updateCollectibles(playerPos) {
+                for (let i = collectibles.length-1; i >= 0; i--) {
+                    const c = collectibles[i];
+                    c.position.z -= 0.15; // Move towards player
+                    
+                    // Check collision
+                    const dx = playerPos.x - c.position.x;
+                    const dz = playerPos.z - c.position.z;
+                    const dist = Math.sqrt(dx*dx + dz*dz);
+                    if (dist < 0.8) {
+                        score += c.userData.value;
+                        document.getElementById('scoreValue').innerText = score;
+                        scene.remove(c);
+                        collectibles.splice(i,1);
+                        playSound('pickup');
+                        
+                        // Visual feedback
+                        const particles = [];
+                        for(let p=0; p<10; p++) {
+                            const particle = new THREE.Mesh(new THREE.SphereGeometry(0.08,4,4), new THREE.MeshStandardMaterial({ color: 0xffaa66 }));
+                            particle.position.copy(c.position);
+                            scene.add(particle);
+                            particles.push(particle);
+                        }
+                        setTimeout(() => particles.forEach(p => scene.remove(p)), 300);
+                    }
+                    
+                    // Remove if too far behind
+                    if (c.position.z < playerPos.z - 10) {
+                        scene.remove(c);
+                        collectibles.splice(i,1);
+                    }
+                }
+                
+                // Spawn new collectibles
+                if (Math.random() < 0.02 && collectibles.length < 25) {
+                    spawnCollectible();
+                }
+            }
+            
+            // ==================== JOYSTICK ====================
+            let joystick = null;
+            const joystickZone = document.getElementById('joystickZone');
+            
+            function initJoystick() {
+                if (joystick) joystick.destroy();
+                joystick = nipplejs.create({
+                    zone: joystickZone,
+                    mode: 'static',
+                    lockY: false,
+                    lockX: false,
+                    restOpacity: 0.5,
+                    size: 120,
+                    color: 'white',
+                    background: 'rgba(0,0,0,0.4)'
+                });
+                
+                joystick.on('move', (evt, nipple) => {
+                    const vector = nipple.vector;
+                    const angle = vector.angle;
+                    const force = Math.min(vector.magnitude / 60, 1);
+                    moveDirection.x = Math.cos(angle * Math.PI / 180) * force;
+                    moveDirection.z = Math.sin(angle * Math.PI / 180) * force;
+                }).on('end', () => {
+                    moveDirection.x = 0;
+                    moveDirection.z = 0;
+                });
+            }
+            
+            initJoystick();
+            
+            // ==================== ANIMATION LOOP ====================
+            let lastTime = performance.now();
+            let playerVelocity = 0;
+            const playerSpeed = 5.5;
+            
+            function animate() {
+                if (!gameRunning) return;
+                
+                const now = performance.now();
+                let delta = Math.min(0.033, (now - lastTime) / 1000);
+                lastTime = now;
+                
+                // Movement
+                let moveX = moveDirection.x * playerSpeed * delta;
+                let moveZ = moveDirection.z * playerSpeed * delta;
+                
+                // Boundary limits
+                let newX = playerGroup.position.x + moveX;
+                newX = Math.max(-3.2, Math.min(3.2, newX));
+                playerGroup.position.x = newX;
+                
+                // Forward movement (auto-run)
+                playerGroup.position.z += 0.12 + (Math.abs(moveDirection.x) * 0.05);
+                
+                // Rotation based on movement
+                if (moveDirection.x !== 0) {
+                    playerGroup.rotation.y = moveDirection.x * 0.5;
+                } else {
+                    playerGroup.rotation.y *= 0.95;
+                }
+                
+                // Bobbing effect
+                const bob = Math.sin(Date.now() * 0.015) * 0.02;
+                playerGroup.position.y = bob;
+                
+                // Update road
+                updateRoad(playerGroup.position.z);
+                
+                // Update collectibles
+                updateCollectibles(playerGroup.position);
+                
+                // Camera follow (third person)
+                const targetCameraPos = {
+                    x: playerGroup.position.x * 0.5,
+                    y: 3.5 + Math.abs(moveDirection.z) * 0.5,
+                    z: playerGroup.position.z - 5
+                };
+                camera.position.x += (targetCameraPos.x - camera.position.x) * 0.1;
+                camera.position.y += (targetCameraPos.y - camera.position.y) * 0.1;
+                camera.position.z += (targetCameraPos.z - camera.position.z) * 0.1;
+                camera.lookAt(playerGroup.position);
+                
+                // Spawn occasional collectibles
+                if (Math.random() < 0.015) spawnCollectible();
+                
+                renderer.render(scene, camera);
+                requestAnimationFrame(animate);
+            }
+            
+            // Spawn initial collectibles
+            for(let i=0; i<15; i++) spawnCollectible();
+            
+            // Start animation after loading
+            setTimeout(() => {
+                document.getElementById('loading').style.display = 'none';
+                initAudio();
+                animate();
+            }, 500);
+            
+            // ==================== UI EVENT HANDLERS ====================
+            document.getElementById('settingsBtn').addEventListener('click', () => {
+                gameRunning = false;
+                document.getElementById('settingsModal').classList.add('active');
+            });
+            
+            document.getElementById('closeSettings').addEventListener('click', () => {
+                gameRunning = true;
+                document.getElementById('settingsModal').classList.remove('active');
+                lastTime = performance.now();
+            });
+            
+            // Character selection
+            document.querySelectorAll('.character-card').forEach(card => {
+                card.addEventListener('click', () => {
+                    document.querySelectorAll('.character-card').forEach(c => c.classList.remove('selected'));
+                    card.classList.add('selected');
+                    selectedCharacter = card.dataset.character;
+                    createCharacter(selectedCharacter);
+                    playSound('pickup');
+                });
+            });
+            
+            // Sound toggle
+            const soundToggle = document.getElementById('soundToggle');
+            const soundSwitch = document.getElementById('soundSwitch');
+            soundToggle.addEventListener('click', () => {
+                soundEnabled = !soundEnabled;
+                if (soundEnabled) {
+                    soundSwitch.classList.add('active');
+                    soundToggle.querySelector('span').innerHTML = '🔊 Sound ON';
+                    initAudio();
+                } else {
+                    soundSwitch.classList.remove('active');
+                    soundToggle.querySelector('span').innerHTML = '🔇 Sound OFF';
+                }
+            });
+            
+            // Handle window resize
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+            
+            // Touch start to enable audio
+            const enableAudio = () => {
+                initAudio();
+                document.removeEventListener('touchstart', enableAudio);
+                document.removeEventListener('click', enableAudio);
+            };
+            document.addEventListener('touchstart', enableAudio);
+            document.addEventListener('click', enableAudio);
+            
+            // Default select warrior
+            document.querySelector('.character-card[data-character="warrior"]').classList.add('selected');
+        })();
+    </script>
+</body>
+</html>
+EOF
+      
+      - name: Create README
+        run: |
+          cat > dist/README.md << 'EOF'
+# ROAD WARRIOR - AAA Mobile Game
+
+A fully playable 3D endless runner game with third-person perspective, on-screen joystick, character selection, and sound effects.
+
+## How to Play
+- Use the on-screen joystick to move left/right
+- Collect glowing orbs for points
+- Avoid falling off the road
+- Change characters in Settings
+- Toggle sound effects
+
+## Install on iPhone (as Web App)
+1. Open Safari and go to your GitHub Pages URL
+2. Tap Share button → "Add to Home Screen"
+3. Play like a native app!
+
+## Features
+- 🎮 On-screen analog joystick
+- 👥 6 playable characters
+- 🌟 Endless procedurally generated road
+- 🎵 Sound effects
+- ⚙️ Settings menu
+- 📱 Mobile-optimized touch controls
+
+## Play Now
+Visit: https://[your-github-username].github.io/[repo-name]/
+EOF
+      
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          publish_branch: gh-pages
+      
+      - name: Output success message
+        run: |
+          echo "✅ GAME BUILT SUCCESSFULLY!"
+          echo "📱 Your game will be available at:"
+          echo "   https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/"
+          echo ""
+          echo "🔄 GitHub Pages may take 1-2 minutes to deploy"
+EOF
