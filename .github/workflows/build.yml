@@ -62,7 +62,7 @@ jobs:
           }
           SWIFT_EOF
 
-      # ── GameViewController (main game logic) ─────────────────────────────────
+      # ── GameViewController (FIXED: CGFloat → Float cast) ────────────────────
       - name: GameViewController.swift
         run: |
           cat > SkyDrift/Sources/GameViewController.swift << 'SWIFT_EOF'
@@ -79,7 +79,7 @@ jobs:
               private var isGameOver = false
               private var score = 0
               private var highScore = 0
-              private var speed: Float = 8.0          // forward speed
+              private var speed: Float = 8.0
               private var horizontalSpeed: Float = 0
 
               private var spawnTimer: TimeInterval = 0
@@ -90,7 +90,7 @@ jobs:
               private var scoreLabel: UILabel!
               private var gameOverView: UIView?
 
-              private var tiltJoystick: JoystickView!  // touch joystick for horizontal movement
+              private var tiltJoystick: JoystickView!
 
               override func viewDidLoad() {
                   super.viewDidLoad()
@@ -117,12 +117,11 @@ jobs:
                   scene = SCNScene()
                   scene.background.contents = UIColor(red: 0.6, green: 0.85, blue: 1.0, alpha: 1)
                   scene.physicsWorld.contactDelegate = self
-                  scene.physicsWorld.gravity = SCNVector3(0, 0, 0)   // no gravity in flying game
+                  scene.physicsWorld.gravity = SCNVector3(0, 0, 0)
                   scnView.scene = scene
                   scnView.delegate = self
                   scnView.isPlaying = true
 
-                  // Ground (visual only)
                   let ground = SCNFloor()
                   let groundMat = SCNMaterial()
                   groundMat.diffuse.contents = UIColor(red: 0.3, green: 0.7, blue: 0.3, alpha: 1)
@@ -133,32 +132,27 @@ jobs:
               }
 
               private func setupPlane() {
-                  // Paper plane made of simple shapes
                   planeNode = SCNNode()
                   planeNode.position = SCNVector3(0, 0, 0)
 
-                  // Body
                   let bodyGeo = SCNCylinder(radius: 0.15, height: 1.2)
                   bodyGeo.firstMaterial?.diffuse.contents = UIColor.white
                   let body = SCNNode(geometry: bodyGeo)
-                  body.eulerAngles = SCNVector3(Float.pi/2, 0, 0) // horizontal
+                  body.eulerAngles = SCNVector3(Float.pi/2, 0, 0)
                   planeNode.addChildNode(body)
 
-                  // Wings
                   let wingGeo = SCNBox(width: 0.8, height: 0.02, length: 0.25, chamferRadius: 0.05)
                   wingGeo.firstMaterial?.diffuse.contents = UIColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 1)
                   let wing = SCNNode(geometry: wingGeo)
                   wing.position = SCNVector3(0, 0, 0)
                   planeNode.addChildNode(wing)
 
-                  // Tail
                   let tailGeo = SCNBox(width: 0.2, height: 0.02, length: 0.4, chamferRadius: 0.02)
                   tailGeo.firstMaterial?.diffuse.contents = UIColor(red: 0.9, green: 0.2, blue: 0.2, alpha: 1)
                   let tail = SCNNode(geometry: tailGeo)
                   tail.position = SCNVector3(0, 0, 0.5)
                   planeNode.addChildNode(tail)
 
-                  // Physics
                   let shape = SCNPhysicsShape(geometry: SCNBox(width: 0.6, height: 0.2, length: 1.2, chamferRadius: 0.1), options: nil)
                   planeNode.physicsBody = SCNPhysicsBody(type: .kinematic, shape: shape)
                   planeNode.physicsBody?.categoryBitMask = PhysicsCategory.player
@@ -229,21 +223,18 @@ jobs:
                   let dt = lastTime == 0 ? 0 : Float(min(time - lastTime, 0.05))
                   lastTime = time
 
-                  // Move plane forward (world moves backward)
-                  speed += 0.02 * dt   // gradually increase speed
+                  speed += 0.02 * dt
                   let moveZ = -speed * dt
                   scene.rootNode.childNodes.forEach { node in
                       if node.name == "obstacle" || node.name == "ring" {
-                          node.position.z += moveZ * 0.5  // move obstacles toward player
+                          node.position.z += moveZ * 0.5
                       }
                   }
 
-                  // Horizontal movement from joystick
-                  horizontalSpeed = tiltJoystick.velocity.x * 4.0   // left/right
+                  horizontalSpeed = tiltJoystick.velocity.x * 4.0
                   planeNode.position.x += horizontalSpeed * dt
                   planeNode.position.x = max(-5, min(5, planeNode.position.x))
 
-                  // Spawn obstacles and rings
                   spawnTimer += Double(dt)
                   if spawnTimer > 1.2 {
                       spawnTimer = 0
@@ -251,7 +242,6 @@ jobs:
                       if Int.random(in: 0...2) == 0 { spawnRing() }
                   }
 
-                  // Remove off-screen objects (behind camera)
                   obstacles.removeAll { node in
                       if node.position.z > 10 {
                           node.removeFromParentNode()
@@ -271,7 +261,8 @@ jobs:
               }
 
               private func spawnObstacle() {
-                  let building = SCNBox(width: 1.5, height: CGFloat.random(in: 2...6), length: 1.5, chamferRadius: 0.1)
+                  let buildingHeight = CGFloat.random(in: 2...6)
+                  let building = SCNBox(width: 1.5, height: buildingHeight, length: 1.5, chamferRadius: 0.1)
                   building.firstMaterial?.diffuse.contents = UIColor(
                       red: CGFloat.random(in: 0.2...0.4),
                       green: CGFloat.random(in: 0.2...0.4),
@@ -280,7 +271,8 @@ jobs:
                   )
                   let node = SCNNode(geometry: building)
                   node.name = "obstacle"
-                  node.position = SCNVector3(Float.random(in: -4...4), building.height/2, -20)
+                  // 👇 FIX: Cast CGFloat to Float explicitly
+                  node.position = SCNVector3(Float.random(in: -4...4), Float(buildingHeight)/2, -20)
                   node.physicsBody = SCNPhysicsBody(type: .static, shape: nil)
                   node.physicsBody?.categoryBitMask = PhysicsCategory.obstacle
                   node.physicsBody?.contactTestBitMask = PhysicsCategory.player
@@ -310,8 +302,6 @@ jobs:
                       self.scoreLabel.text = "SCORE: \(self.score)"
                   }
               }
-
-              // MARK: - Collisions
 
               func physicsWorld(_ world: SCNPhysicsWorld, didBegin contact: SCNPhysicsContact) {
                   let maskA = contact.nodeA.physicsBody?.categoryBitMask ?? 0
@@ -406,7 +396,7 @@ jobs:
           }
           SWIFT_EOF
 
-      # ── JoystickView (same as before) ────────────────────────────────────────
+      # ── JoystickView (unchanged) ─────────────────────────────────────────────
       - name: JoystickView.swift
         run: |
           cat > SkyDrift/Sources/JoystickView.swift << 'SWIFT_EOF'
@@ -598,7 +588,7 @@ jobs:
               for y in range(h):
                   row = [0]
                   for x in range(w):
-                      r, g, b = 100, 180, 255  # sky blue
+                      r, g, b = 100, 180, 255
                       row += [r, g, b]
                   rows.append(bytes(row))
               raw  = zlib.compress(b''.join(rows), 9)
